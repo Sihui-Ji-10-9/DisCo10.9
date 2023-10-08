@@ -156,6 +156,16 @@ class Net(nn.Module):
             self.refer_clip_proj = torch.nn.Linear(clip_image_encoder.visual_projection.in_features, clip_image_encoder.visual_projection.out_features, bias=False)
             self.refer_clip_proj.load_state_dict(clip_image_encoder.visual_projection.state_dict())
             self.refer_clip_proj.requires_grad_(True)
+        # if args.add_shape:
+        #     self.cc_projection1 = nn.Linear(10,1000)
+        #     self.relu = nn.ReLU()
+        #     self.cc_projection2 = nn.Linear(1000,768)
+        #     nn.init.eye_(list(self.cc_projection1.parameters())[0][:1000,:1000])
+        #     nn.init.zeros_(list(self.cc_projection1.parameters())[1])
+        #     self.cc_projection1.requires_grad_(True)
+        #     nn.init.eye_(list(self.cc_projection2.parameters())[0][:768,:768])
+        #     nn.init.zeros_(list(self.cc_projection2.parameters())[1])
+        #     self.cc_projection2.requires_grad_(True)
 
 
     def enable_vae_slicing(self):
@@ -501,7 +511,21 @@ class Net(nn.Module):
             refer_latents = self.clip_encode_image_local(ref_image).to(dtype=self.dtype)
         else:
             refer_latents = self.clip_encode_image_global(ref_image).to(dtype=self.dtype)
-
+        # if self.args.add_shape:
+        #     shape =torch.tensor([eval(s) for s in inputs['shape']])
+        #     shape =shape[:,None,:].to(memory_format=torch.contiguous_format).float()
+        #     shape = shape.to(device=self.device,dtype=self.dtype)
+        #     with torch.enable_grad():
+        #         shape = self.cc_projection1(shape)
+        #         # print('shape1',shape.shape)
+        #         # shape1 torch.Size([64, 1, 1000])
+        #         shape = self.relu(shape)
+        #         shape = self.cc_projection2(shape)
+        #         # print('shape2',shape.shape)
+        #         # shape2 torch.Size([64, 1, 768])
+        #         refer_latents = torch.cat([refer_latents,shape],dim=1)
+        #         # print('shape3',refer_latents.shape)
+        #         # shape3 torch.Size([64, 258, 768])
         latents = self.image_encoder(image)
         latents = latents.to(dtype=self.dtype)
         noise = torch.randn_like(latents)
@@ -615,7 +639,6 @@ class Net(nn.Module):
             refer_latents = self.clip_encode_image_local(ref_image, self.args.num_inf_images_per_prompt, do_classifier_free_guidance)
         else:
             refer_latents = self.clip_encode_image_global(ref_image, self.args.num_inf_images_per_prompt, do_classifier_free_guidance)
-
         if self.args.ref_null_caption: # test must use null caption
             text = inputs['input_text']
             text = ["" for i in text]
@@ -623,6 +646,27 @@ class Net(nn.Module):
                 text, num_images_per_prompt=self.args.num_inf_images_per_prompt,
                 do_classifier_free_guidance=do_classifier_free_guidance,
                 negative_prompt=None)
+        # if self.args.add_shape:
+        #     shape =torch.tensor([eval(s) for s in inputs['shape']])
+        #     shape =shape[:,None,:].to(memory_format=torch.contiguous_format).float()
+        #     shape = shape.to(device=self.device,dtype=self.dtype)
+        #     if do_classifier_free_guidance:
+        #         zero_shape = torch.zeros_like(shape)
+        #         shape = torch.cat([zero_shape, shape])
+        #         shape = shape.to(device=self.device,dtype=self.dtype)
+        #     # print('=====',shape.shape,refer_latents.shape) 
+        #     # torch.Size([20, 1, 10]) torch.Size([20, 257, 768])
+        #     with torch.enable_grad():
+        #         shape = self.cc_projection1(shape)
+        #         # print('shape1',shape.shape)
+        #         # shape1 torch.Size([20, 1, 1000])
+        #         shape = self.relu(shape)
+        #         shape = self.cc_projection2(shape)
+        #         # print('shape2',shape.shape)
+        #         # shape2 torch.Size([20, 1, 768])
+        #         refer_latents = torch.cat([refer_latents,shape],dim=1)
+        #         # print('shape3',refer_latents.shape)
+        #         # shape3 torch.Size([20, 258, 768])
 
 
         # Prepare conditioning image

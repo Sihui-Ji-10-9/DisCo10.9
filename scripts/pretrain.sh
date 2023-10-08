@@ -1,0 +1,11 @@
+AZFUSE_USE_FUSE=0 QD_USE_LINEIDX_8B=0 NCCL_ASYNC_ERROR_HANDLING=0 python finetune_sdm_yaml.py \
+--cf config/ref_attn_clip_combine_controlnet_attr_pretraining/coco_S256_xformers_tsv_strongrand.py \
+--do_train --root_dir /home1/wangtan/code/ms_internship2/github_repo/run_test \
+--local_train_batch_size 64 --local_eval_batch_size 64 --log_dir exp/tiktok_pretrain \
+--epochs 40 --deepspeed --eval_step 2000 --save_step 2000 --gradient_accumulate_steps 1 \
+--learning_rate 1e-3 --fix_dist_seed --loss_target "noise" \
+--train_yaml ./blob_dir/debug_output/video_sythesis/dataset/composite/train_TiktokDance-coco-single_person-Lindsey_0411_youtube-SHHQ-1.0-deepfashion2-laion_human-masks-single_cap.yaml \
+--val_yaml ./blob_dir/debug_output/video_sythesis/dataset/composite/val_TiktokDance-coco-single_person-SHHQ-1.0-masks-single_cap.yaml \
+--unet_unfreeze_type "transblocks" --refer_sdvae --ref_null_caption False \
+--combine_clip_local --combine_use_mask \
+--conds "masks" --max_eval_samples 2000 --strong_aug_stage1 --node_split_sampler 0

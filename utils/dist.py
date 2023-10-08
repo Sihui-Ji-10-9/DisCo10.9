@@ -57,7 +57,7 @@ def dist_init(args, distributed=True):
             args.distributed = True  # args.num_gpus > 1
             args.local_rank = local_rank
             args.rank = rank
-            args.num_nodes = world_size // args.local_size  # hardcoded
+            args.num_nodes = args.word_size // args.local_size  # hardcoded
             args.node_id = int(args.rank / args.local_size)
             if args.distributed:
                 LOGGER.info(
@@ -81,7 +81,7 @@ def dist_init(args, distributed=True):
             args.node_id = 0
             os.environ['LOCAL_RANK'] = str(args.local_rank)
             master_addr = os.environ.get("MASTER_ADDR", 'localhost')
-            master_port = os.environ.get("MASTER_PORT", 12475)
+            master_port = os.environ.get("MASTER_PORT", 12306)
             master_uri = f"tcp://{master_addr}:{master_port}" #if master_addr else 'localhost'
             LOGGER.info(
                 f"Init distributed training on "

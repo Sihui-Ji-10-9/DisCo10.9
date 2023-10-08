@@ -139,11 +139,13 @@ class Args(object):
                             help="unet_loss_target")
         parser.add_argument("--x0_steps", default=200,  type=int,
                             help="steps to calc x0 loss")
-        parser.add_argument('--pretrained_model_path', default='diffusers/stable-diffusion-v1-4', type=str)
+        parser.add_argument('--pretrained_model_path', default='/home/nfs/jsh/DisCo/diffusers/sd-image-variations-diffusers', type=str)
 
         # training configs
         parser.add_argument("--num_workers", default=4,  type=int,
                             help="number of  workers")
+        parser.add_argument("--local_rank", default=0,  type=int,
+                            help="local_rank")
         parser.add_argument('--node_split_sampler',
                             help="use node_split_sampler",  type=str_to_bool,
                             nargs='?', const=True, default=False)
@@ -173,6 +175,16 @@ class Args(object):
         parser.add_argument('--null_caption',  type=str_to_bool,
                             nargs='?', const=True, default=False)
         parser.add_argument('--refer_sdvae',  type=str_to_bool, # use sd vae to process the reference image
+                            nargs='?', const=True, default=False)
+        parser.add_argument('--viton',  type=str_to_bool, 
+                            nargs='?', const=True, default=False)
+        parser.add_argument('--viton_hd',  type=str_to_bool, 
+                            nargs='?', const=True, default=False)
+        parser.add_argument('--MPV3D',  type=str_to_bool, 
+                            nargs='?', const=True, default=False)
+        parser.add_argument('--add_shape',  type=str_to_bool, 
+                            nargs='?', const=True, default=False)
+        parser.add_argument('--base',  type=str_to_bool, 
                             nargs='?', const=True, default=False)
         parser.add_argument('--controlnet_conditioning_scale_cond', default=1.0, type=float)
         parser.add_argument('--controlnet_conditioning_scale_ref', default=1.0, type=float)
@@ -251,6 +263,8 @@ class Args(object):
         parser.add_argument('--local_eval_batch_size', default=1, type=int)
         parser.add_argument('--eval_visu', type=str_to_bool,
                             nargs='?', const=True, default=False)
+        parser.add_argument('--eval_visu_demo', type=str_to_bool,
+                            nargs='?', const=True, default=False)
         parser.add_argument('--eval_visu_trainsample', type=str_to_bool,
                             nargs='?', const=True, default=False)
         parser.add_argument('--eval_visu_imagefolder', type=str_to_bool,
@@ -312,6 +326,7 @@ class Args(object):
 
     def parse_args(self):
         parsed_args = self.parser.parse_args()
+        local_rank = parsed_args.local_rank
         if parsed_args.root_dir:
             BasicArgs.root_dir = parsed_args.root_dir
         else:

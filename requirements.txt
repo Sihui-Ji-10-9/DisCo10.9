@@ -1,6 +1,6 @@
 wandb
 ffmpeg-python
-opencv-python
+opencv-python==4.2.0.34
 timm
 ftfy==6.0.3
 tensorboardX==2.4.1

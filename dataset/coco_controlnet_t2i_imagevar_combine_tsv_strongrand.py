@@ -8,6 +8,7 @@ from dataset.tsv_cond_dataset import TsvCondImgCompositeDataset
 class BaseDataset(TsvCondImgCompositeDataset):
     def __init__(self, args, yaml_file, split='train', preprocesser=None):
         self.img_size = getattr(args, 'img_full_size', args.img_size)
+        self.clip_size = (224,224)
         self.basic_root_dir = BasicArgs.root_dir
         self.max_video_len = args.max_video_len
         assert self.max_video_len == 1
@@ -25,36 +26,59 @@ class BaseDataset(TsvCondImgCompositeDataset):
         self.random_square_width = transforms.Lambda(lambda img: transforms.functional.crop(img, top=0, left=int(torch.randint(0, img.width - img.height, (1,)).item()), height=img.height, width=img.height))
 
         min_crop_scale = 0.5 if self.args.strong_aug_stage1 else 0.9
+        if args.viton:
+            width=192
+            height=256
+        elif args.viton_hd:
+            width=768
+            height=1024
+        if args.MPV3D:
+            width=320
+            height=512
+        target_size = max(width, height)
+        
+        padding_left = (target_size - width) // 2
+        padding_top = (target_size - height) // 2
+        padding_right = target_size - width - padding_left
+        padding_bottom = target_size - height - padding_top
         self.transform = transforms.Compose([
-            transforms.RandomResizedCrop(
-                self.img_size,
-                scale=(min_crop_scale, 1.0), ratio=(1., 1.),
-                interpolation=transforms.InterpolationMode.BILINEAR),
+            # transforms.RandomResizedCrop(
+            #     self.img_size,
+            #     scale=(min_crop_scale, 1.0), ratio=(1., 1.),
+            #     interpolation=transforms.InterpolationMode.BILINEAR),
+            transforms.Pad((padding_left, padding_top, padding_right, padding_bottom), padding_mode="edge"),
+            transforms.Resize(self.img_size, interpolation=transforms.InterpolationMode.BILINEAR),
             transforms.ToTensor(),
             transforms.Normalize([0.5], [0.5]),
         ])
         self.cond_transform = transforms.Compose([
-            transforms.RandomResizedCrop(
-                self.img_size,
-                scale=(min_crop_scale, 1.0), ratio=(1., 1.),
-                interpolation=transforms.InterpolationMode.BILINEAR),
+            # transforms.RandomResizedCrop(
+            #     self.img_size,
+            #     scale=(min_crop_scale, 1.0), ratio=(1., 1.),
+            #     interpolation=transforms.InterpolationMode.BILINEAR),
+            transforms.Pad((padding_left, padding_top, padding_right, padding_bottom), padding_mode="edge"),
+            transforms.Resize(self.img_size, interpolation=transforms.InterpolationMode.BILINEAR),
             transforms.ToTensor(),
         ])
 
         self.ref_transform = transforms.Compose([ # follow CLIP transform
             transforms.ToTensor(),
-            transforms.RandomResizedCrop(
-                (224, 224),
-                scale=(min_crop_scale, 1.0), ratio=(1., 1.),
-                interpolation=transforms.InterpolationMode.BICUBIC),
+            transforms.Pad((padding_left, padding_top, padding_right, padding_bottom), padding_mode="edge"),
+            transforms.Resize(self.clip_size, interpolation=transforms.InterpolationMode.BICUBIC),
+            # transforms.RandomResizedCrop(
+            #     (224, 224),
+            #     scale=(min_crop_scale, 1.0), ratio=(1., 1.),
+            #     interpolation=transforms.InterpolationMode.BICUBIC),
             transforms.Normalize([0.48145466, 0.4578275, 0.40821073],
                                  [0.26862954, 0.26130258, 0.27577711]),
         ])
         self.ref_transform_mask = transforms.Compose([ # follow CLIP transform
-            transforms.RandomResizedCrop(
-                (224, 224),
-                scale=(min_crop_scale, 1.0), ratio=(1., 1.),
-                interpolation=transforms.InterpolationMode.BICUBIC),
+            # transforms.RandomResizedCrop(
+            #     (224, 224),
+            #     scale=(min_crop_scale, 1.0), ratio=(1., 1.),
+            #     interpolation=transforms.InterpolationMode.BICUBIC),
+            transforms.Pad((padding_left, padding_top, padding_right, padding_bottom), padding_mode="edge"),
+            transforms.Resize(self.clip_size, interpolation=transforms.InterpolationMode.BICUBIC),
             transforms.ToTensor(),
         ])
 
@@ -85,45 +109,98 @@ class BaseDataset(TsvCondImgCompositeDataset):
             return transform2(frame_transform1)
     
     def get_metadata(self, idx):
-        img_idx, cap_idx = self.get_image_cap_index(idx)
+        img_idx = self.get_image_index(idx)
         img_key = self.image_keys[img_idx]
-        (caption_sample, tag, start,
-         end, _) = self.get_caption_and_timeinfo_wrapper(
-            img_idx, cap_idx)
+        # (caption_sample, tag, start,
+        #  end, _) = self.get_caption_and_timeinfo_wrapper(
+        #     img_idx, cap_idx)
         # get image or video frames
         # frames: (T, C, H, W),  is_video: binary tag
-        frames, is_video = self.get_visual_data(img_idx)
+        img = self.get_img(img_idx)
 
-        if isinstance(caption_sample, dict):
-            caption = caption_sample["caption"]
-        else:
-            caption = caption_sample
-            caption_sample = None
+        # if isinstance(caption_sample, dict):
+        #     caption = caption_sample["caption"]
+        # else:
+        #     caption = caption_sample
+        #     caption_sample = None
 
         # preparing outputs
         meta_data = {}
-        meta_data['caption'] = caption  # raw text data, not tokenized
+        # meta_data['caption'] = caption  # raw text data, not tokenized
         meta_data['img_key'] = img_key
-        meta_data['is_video'] = is_video  # True: video data, False: image data
         meta_data['pose_img'] = None # setting pose to None
-        if self.args.combine_use_mask:
-            meta_data['mask_img'] = self.get_cond(img_idx, 'masks')
+        # if self.args.combine_use_mask:
+        #     meta_data['mask_img'] = self.get_cond(img_idx, 'masks')
 
         # ref and target image are the same 
         meta_data['ref_img_key'] = img_key
-        meta_data['reference_img'] = frames
+        if self.args.base:
+            meta_data['reference_img'] = img
+        else:
+            meta_data['reference_img'] = self.get_cloth(img_idx)
+        meta_data['shape'] = self.get_shape(img_idx)
         if self.args.combine_use_mask:
-            meta_data['mask_img_ref'] = meta_data['mask_img']
-        meta_data['img'] = frames
+            if self.args.base:
+                meta_data['mask_img_ref'] = self.get_img_mask(img_idx)
+            else:
+                meta_data['mask_img_ref'] = self.get_cloth_mask(img_idx)
+        meta_data['img'] = img
+        meta_data['smpl'] = self.get_smpl(img_idx)
         return meta_data
     
-    def get_visual_data(self, img_idx):
+    def get_img(self, img_idx):
         try:
             row = self.get_row_from_tsv(self.visual_tsv, img_idx)
-            return self.str2img(row[-1]), False
+            return self.str2img(row[-1])
         except Exception as e:
             raise ValueError(
-                    f"{e}, in get_visual_data()")
+                    f"{e}, in get_img()")
+    def get_shape(self, img_idx):
+        try:
+            # print(img_idx)
+            row = self.get_row_from_tsv(self.shape_tsv, img_idx)
+            return row[-1]
+        except Exception as e:
+            raise ValueError(
+                    f"{e}, in get_shape()")
+    def get_smpl(self, img_idx):
+        try:
+            row = self.get_row_from_tsv(self.smpl_tsv, img_idx)
+            return self.str2img(row[-1])
+        except Exception as e:
+            raise ValueError(
+                    f"{e}, in get_smpl()")
+    def get_cloth(self, img_idx):
+        # print(img_idx)
+        try:
+            row = self.get_row_from_tsv(self.cloth_tsv, img_idx)
+            return self.str2img(row[-1])
+        except Exception as e:
+            raise ValueError(
+                    f"{e}, in get_cloth()")
+    def get_cloth_mask(self, img_idx):
+        row = self.get_row_from_tsv(self.cloth_mask_tsv, img_idx)
+        if len(row) == 3:
+            image_key, buf, valid = row
+            # assert image_key == self.image_keys[img_idx]
+            if not valid:
+                return None
+            else:
+                return self.str2img(buf)
+        else:
+            return self.str2img(row[1])
+    def get_img_mask(self, img_idx):
+        row = self.get_row_from_tsv(self.img_mask_tsv, img_idx)
+        if len(row) == 3:
+            image_key, buf, valid = row
+            # assert image_key == self.image_keys[img_idx]
+            if not valid:
+                return None
+            else:
+                return self.str2img(buf)
+        else:
+            return self.str2img(row[1])
+        
 
     def __len__(self):
         if self.split == 'train':
@@ -141,6 +218,7 @@ class BaseDataset(TsvCondImgCompositeDataset):
 
         raw_data = self.get_metadata(idx)
         img = raw_data['img']
+        shape = raw_data['shape']
         skeleton_img = raw_data['pose_img']
         reference_img = raw_data['reference_img']
         img_key = raw_data['img_key']
@@ -148,14 +226,14 @@ class BaseDataset(TsvCondImgCompositeDataset):
 
         # first check the size of the ref image
         ref_img_size = raw_data['reference_img'].size
-        if ref_img_size[0] > ref_img_size[1]: # width > height
-            transform1 = self.random_square_width
-        elif ref_img_size[0] < ref_img_size[1]:
-            transform1 = self.random_square_height
-        else:
-            transform1 = None
+        # if ref_img_size[0] > ref_img_size[1]: # width > height
+        #     transform1 = self.random_square_width
+        # elif ref_img_size[0] < ref_img_size[1]:
+        #     transform1 = self.random_square_height
+        # else:
+        transform1 = None
 
-        reference_img_controlnet = reference_img
+        reference_img_controlnet = raw_data['smpl']
         state = torch.get_rng_state()
         img = self.augmentation(img, transform1, self.transform, state)
         if skeleton_img is not None:
@@ -174,21 +252,18 @@ class BaseDataset(TsvCondImgCompositeDataset):
 
             assert not getattr(self.args, 'refer_clip_preprocess', None) # mask not support the CLIP process
             reference_img_mask = self.augmentation(mask_img_ref, transform1, self.ref_transform_mask, state)
-            reference_img_controlnet_mask = self.augmentation(mask_img_ref, transform1, self.cond_transform, state)  # controlnet path input
+            # reference_img_controlnet_mask = self.augmentation(mask_img_ref, transform1, self.cond_transform, state)  # controlnet path input
             if 'laion' in ref_img_key or 'deepfashion' in ref_img_key: # normailze mask for grounded sam mask
                 reference_img_mask = self.normalize_mask(reference_img_mask)
-                reference_img_controlnet_mask = self.normalize_mask(reference_img_controlnet_mask)
+                # reference_img_controlnet_mask = self.normalize_mask(reference_img_controlnet_mask)
 
             # apply the mask
             reference_img = reference_img * reference_img_mask# foreground
-            reference_img_vae = reference_img_vae * reference_img_controlnet_mask # foreground, but for vae
-            reference_img_controlnet = reference_img_controlnet * (1 - reference_img_controlnet_mask)# background
 
-        caption = raw_data['caption']
-        outputs = {'img_key':img_key, 'input_text': caption, 'label_imgs': img,  'reference_img': reference_img, 'reference_img_controlnet':reference_img_controlnet, 'reference_img_vae':reference_img_vae}
+        # caption = raw_data['caption']
+        outputs = {'img_key':img_key, 'shape': shape,'label_imgs': img,  'reference_img': reference_img, 'reference_img_controlnet':reference_img_controlnet, 'reference_img_vae':reference_img_vae}
         if self.args.combine_use_mask:
             outputs['background_mask'] = (1 - reference_img_mask)
-            outputs['background_mask_controlnet'] = (1 - reference_img_controlnet_mask)
         if skeleton_img is not None:
             outputs.update({'cond_imgs': skeleton_img})
 

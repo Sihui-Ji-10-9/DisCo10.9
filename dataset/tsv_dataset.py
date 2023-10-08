@@ -474,8 +474,17 @@ class TsvCompositeDataset(Dataset_Base):
         self.cap_linelist_file = find_file_path_in_yaml(
             self.cfg.get('caption_linelist', None), self.root)
         self.visual_file = self.cfg.get('img', None)
+        self.cloth_file = self.cfg.get('cloth', None)
+        self.cloth_mask_file = self.cfg.get('cloth_mask', None)
+        self.smpl_file = self.cfg.get('smpl', None)
+        self.shape_file = self.cfg.get('shape', None)
+        self.img_mask_file = self.cfg.get('img_mask', None)
         self.visual_tsv = self.get_tsv_file(self.visual_file)
-
+        self.shape_tsv = self.get_tsv_file(self.shape_file)
+        self.cloth_tsv = self.get_tsv_file(self.cloth_file)
+        self.cloth_mask_tsv = self.get_tsv_file(self.cloth_mask_file)
+        self.img_mask_tsv = self.get_tsv_file(self.img_mask_file)
+        self.smpl_tsv = self.get_tsv_file(self.smpl_file)
         self.label_file = self.cfg.get('label', None)
         self.label_tsv = self.get_tsv_file(self.label_file)
 
@@ -583,8 +592,8 @@ class TsvCompositeDataset(Dataset_Base):
         tsv = self.get_valid_tsv()
         return {tsv.get_key(i): i for i in range(tsv.num_rows())}
 
-    def get_image_cap_index(self, idx):
-        return self.img_line_list[idx], self.cap_line_list[idx]
+    def get_image_index(self, idx):
+        return self.img_line_list[idx]
 
     def get_row_from_tsv(self, tsv, img_idx):
         row = tsv[img_idx]
@@ -596,7 +605,8 @@ class TsvCompositeDataset(Dataset_Base):
             #     print(self.image_keys[img_idx])
             #     print(row[0])
         else:
-            assert row[0] == self.image_keys[img_idx]
+            pass
+            # assert row[0] == self.image_keys[img_idx]
         return row
 
     def get_caption(self, img_idx, cap_idx):
