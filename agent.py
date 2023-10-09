@@ -136,7 +136,7 @@ class Agent():
                 step = self.global_step
             log_dict_to_wandb(log_dict, step)
 
-    def log_img_to_wandb(self, label_imgs, cond_imgs, ref_imgs, pred_imgs, step=-1, prefix=''):
+    def log_img_to_wandb(self, label_imgs, cond_imgs, ref_imgs, pred_imgs, ref_controlnet_imgs,step=-1, prefix=''):
         if WANDB_ENABLE and not self.args.debug:
             if step == -1:
                 step = self.global_step
@@ -150,6 +150,8 @@ class Agent():
                     img_dict[f"{prefix}_cond_img"].append(wandb.Image(ldm_tensor2img(cond_imgs[i])))
                 if ref_imgs is not None:
                     img_dict[f"{prefix}_ref_img"].append(wandb.Image(ldm_tensor2img(ref_imgs[i], preprocess=True)))
+                if ref_controlnet_imgs is not None:
+                    img_dict[f"{prefix}_ref_controlnet_img"].append(wandb.Image(ldm_tensor2img(ref_controlnet_imgs[i], preprocess=True)))
             log_img_to_wandb(img_dict, step)
 
     def update_metric_file(self, metric):
@@ -461,7 +463,8 @@ class Agent():
                     cond_imgs = inputs['cond_imgs']
                     ref_imgs = inputs['reference_img']
                     pred_imgs = outputs['logits_imgs']
-                    self.log_img_to_wandb(label_imgs, cond_imgs, ref_imgs, pred_imgs, prefix='val')
+                    ref_controlnet_imgs = inputs['reference_img_controlnet']
+                    self.log_img_to_wandb(label_imgs, cond_imgs, ref_imgs, pred_imgs, ref_controlnet_imgs,prefix='val')
 
             if train_eval_input: # run a simple-round training sample to check if it is over-fitting
                 print('run a single-round training sample inference to check if over-fitting')
@@ -478,7 +481,8 @@ class Agent():
                 cond_imgs = inputs['cond_imgs']
                 ref_imgs = inputs['reference_img']
                 pred_imgs = outputs['logits_imgs']
-                self.log_img_to_wandb(label_imgs, cond_imgs, ref_imgs, pred_imgs, prefix='train')
+                ref_controlnet_imgs = inputs['reference_img_controlnet']
+                self.log_img_to_wandb(label_imgs, cond_imgs, ref_imgs, pred_imgs,ref_controlnet_imgs,prefix='train')
 
 
         eval_meter = self.get_eval_metrics(eval_meter, eval_save_filename, gt_save_path, pred_save_path)
