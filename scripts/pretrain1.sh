@@ -7,5 +7,5 @@ PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION=python AZFUSE_USE_FUSE=0 QD_USE_LINEIDX_8
 --train_yaml /HOME/HOME/jisihui/VITON/train/tsv/train.yaml \
 --val_yaml /HOME/HOME/jisihui/VITON/try/tsv/val.yaml \
 --unet_unfreeze_type "transblocks"  --ref_null_caption False \
---combine_clip_local --combine_use_mask --viton --base \
+--combine_clip_local  --viton --base \
 --conds "masks" --max_eval_samples 2000 --strong_aug_stage1 --node_split_sampler 0
