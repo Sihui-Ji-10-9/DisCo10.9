@@ -71,3 +71,5 @@ docs/_build/
 /pretrain_model
 /command
 /cocoapi
+/exp/
+/wandb/
