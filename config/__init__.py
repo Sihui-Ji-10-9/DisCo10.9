@@ -41,7 +41,7 @@ class BasicArgs:
         logger.info("Detected ITP Common Node %s." % platform.node())
         # root_dir = '/f_ndata/G/'
         # os.environ['MASTER_ADDR'] = os.environ['MASTER_IP']
-        os.environ['MASTER_PORT'] = '12306'
+        # os.environ['MASTER_PORT'] = '12306'
 
     elif platform.node().startswith('az-eus-v100-16gb') or platform.node().startswith('az-sea-v100-16gb'):
         logger.info("Detected ITP Common Node %s." % platform.node())

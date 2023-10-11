@@ -1,0 +1,14 @@
+PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION=python AZFUSE_USE_FUSE=0 NCCL_ASYNC_ERROR_HANDLING=0 python -m torch.distributed.launch --nproc_per_node=4 --master_port=12308 finetune_sdm_yaml.py \
+--cf config/ref_attn_clip_combine_controlnet/tiktok_S256L16_xformers_tsv.py \
+--do_train --root_dir /home/nfs/jsh/DisCo \ 
+--local_train_batch_size 32 \
+--local_eval_batch_size 32 \
+--log_dir exp/ft \ 
+--epochs 20 --deepspeed --eval_step 500 --save_step 500 --gradient_accumulate_steps 1 \
+--learning_rate 2e-4 --fix_dist_seed --loss_target "noise" \
+--train_yaml /HOME/HOME/jisihui/VITON/train/tsv/train.yaml \
+--val_yaml /HOME/HOME/jisihui/VITON/try/tsv/val.yaml \
+--unet_unfreeze_type "all" --ref_null_caption False \
+--combine_clip_local --combine_use_mask \
+--conds "poses" "masks" \
+--stage1_pretrain_path /path/to/pretrained_model_checkpoint/mp_rank_00_model_states.pt 

@@ -994,8 +994,9 @@ class Agent_LDM(Agent):
             new_state = {}
             for k, v in pretrain_model_state['module'].items():
                 if k.startswith('controlnet.'):
-                    new_key = k[:11] + 'nets.1.' + k[11:]
-                    new_state[new_key] = v
+                    # new_key = k[:11] + 'nets.1.' + k[11:]
+                    # new_state[new_key] = v
+                    new_state[k] = v
                 else:
                     new_state[k] = v
             ### load

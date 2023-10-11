@@ -48,6 +48,7 @@ class Net(nn.Module):
                 args.pretrained_model_path, subfolder="scheduler")
         # tokenizer = CLIPTokenizer.from_pretrained(
         #     args.pretrained_model_path, subfolder="tokenizer")
+        # print('====',args.pretrained_model_path)
         feature_extractor = CLIPImageProcessor.from_pretrained(args.pretrained_model_path, subfolder="feature_extractor")
         print(f"Loading pre-trained image_encoder from {args.pretrained_model_path}/image_encoder")
         clip_image_encoder = CLIPVisionModelWithProjection.from_pretrained(args.pretrained_model_path, subfolder="image_encoder")
@@ -105,6 +106,12 @@ class Net(nn.Module):
             new_config = dict(self.unet.config)
             new_config["sample_size"] = 64
             unet._internal_dict = FrozenDict(new_config)
+            # Modify input layer to have 1 additional input channels (pose)
+            weights = unet.conv_in.weight.clone()
+            unet.conv_in = nn.Conv2d(6, weights.shape[0], kernel_size=3, padding=(1, 1)) # input noise + n poses
+            with torch.no_grad():
+                unet.conv_in.weight[:, :4] = weights # original weights
+                unet.conv_in.weight[:, 4:] = torch.zeros(unet.conv_in.weight[:, 3:].shape) # new weights initialized to zero
         
         if self.args.enable_xformers_memory_efficient_attention:
             if is_xformers_available():
@@ -166,6 +173,7 @@ class Net(nn.Module):
             nn.init.eye_(list(self.cc_projection2.parameters())[0][:768,:768])
             nn.init.zeros_(list(self.cc_projection2.parameters())[1])
             self.cc_projection2.requires_grad_(True)
+        # self.conv_layer = nn.Conv2d(7, 4, kernel_size=3, stride=1, padding=1)
 
 
     def enable_vae_slicing(self):
@@ -207,6 +215,9 @@ class Net(nn.Module):
                     if 'transformer_blocks' not in param_name:
                         param.requires_grad_(False)
                     else:
+                        param.requires_grad_(True)
+                        param_unfreeze_num += 1
+                    if 'conv_in' in param_name:
                         param.requires_grad_(True)
                         param_unfreeze_num += 1
 
@@ -495,6 +506,11 @@ class Net(nn.Module):
         return latents
 
     def forward_train_multicontrol(self, inputs, outputs):
+        # # use CFG
+        # if self.args.drop_ref > 0:
+        #     p = random.random()
+        #     if p <= self.args.drop_ref: # dropout ref image
+        #         inputs['reference_img'] = torch.zeros_like(inputs['reference_img'])
         loss_target = self.args.loss_target
         image = inputs['label_imgs']  # (B, C, H, W)
         ref_image = inputs['reference_img']
@@ -549,7 +565,20 @@ class Net(nn.Module):
             reference_latents_controlnet = inputs["reference_img_controlnet"]
         # controlnet_image = [inputs["cond_imgs"], reference_latents_controlnet]  # [pose image, ref image]
         controlnet_image = reference_latents_controlnet  # [ref image]
-
+        smpl = torch.tensor(reference_latents_controlnet).cuda()
+        # Concatenate pose with noise
+        _, _, h, w = noisy_latents.shape
+        print('noisy_latents',noisy_latents.shape)
+        # torch.Size([64, 4, 32, 32])
+        print('smpl',smpl.shape)
+        # torch.Size([64, 3, 256, 256])
+        print('smpl2',F.interpolate(smpl, (h,w)).shape)
+        # smpl2 torch.Size([64, 3, 32, 32])
+        noisy_latents = torch.cat((noisy_latents, F.interpolate(smpl, (h,w))), 1)
+        # noisy_latents = self.conv_layer(noisy_latents)
+        # print('noisy_latents',noisy_latents.shape)
+        # torch.Size([64, 4, 32, 32])
+        '''
         # controlnet get the input of (a. ref image clip embedding; b. pose cond image)
         if self.args.ref_null_caption:
             down_block_res_samples, mid_block_res_sample = self.controlnet(
@@ -559,14 +588,12 @@ class Net(nn.Module):
             down_block_res_samples, mid_block_res_sample = self.controlnet(
                 noisy_latents, timesteps, refer_latents, # both controlnet path use the refer latents
                 controlnet_cond=controlnet_image, return_dict=False)
-
+        '''
         # Predict the noise residual
         model_pred = self.unet(
             noisy_latents,
             timesteps,
-            encoder_hidden_states=refer_latents, # refer latents
-            down_block_additional_residuals=down_block_res_samples,
-            mid_block_additional_residual=mid_block_res_sample,
+            encoder_hidden_states=refer_latents # refer latents
         ).sample
 
         if loss_target == "x0":
@@ -632,9 +659,12 @@ class Net(nn.Module):
     @torch.no_grad()
     def forward_sample_multicontrol(self, inputs, outputs):
         gt_image = inputs['label_imgs']
+        # print('gt_image',gt_image.shape)
         b, c, h, w = gt_image.size()
         ref_image = inputs['reference_img']
+        # print('!!!',ref_image.shape) torch.Size([10, 3, 224, 224])         
         do_classifier_free_guidance = self.guidance_scale > 1.0
+        # print('do_classifier_free_guidance',do_classifier_free_guidance) True
         if self.args.combine_clip_local:
             refer_latents = self.clip_encode_image_local(ref_image, self.args.num_inf_images_per_prompt, do_classifier_free_guidance)
         else:
@@ -690,7 +720,8 @@ class Net(nn.Module):
             reference_latents_controlnet = reference_latents_controlnet.to(dtype=self.dtype)
         else:
             reference_latents_controlnet = inputs['reference_img_controlnet'].to(dtype=self.dtype)
-
+        # print('reference_latents_controlnet',reference_latents_controlnet.shape)
+        # pose = preprocess(pose) #处理维度
         reference_latents_controlnet = self.prepare_image(
             image=reference_latents_controlnet,
             width=w,
@@ -701,7 +732,7 @@ class Net(nn.Module):
             dtype=self.controlnet.dtype,
             do_classifier_free_guidance=do_classifier_free_guidance,
         )
-
+        smpl= torch.tensor(reference_latents_controlnet).cuda()
 
         # Prepare timesteps
         self.noise_scheduler.set_timesteps(
@@ -734,6 +765,20 @@ class Net(nn.Module):
                 latent_model_input = torch.cat([latents] * 2) if do_classifier_free_guidance else latents
                 latent_model_input = self.noise_scheduler.scale_model_input(latent_model_input, t)
 
+                # Add pose to noisy latents
+                _, _, h, w = latent_model_input.shape
+                if do_classifier_free_guidance:
+                    smpl_input = torch.cat([torch.zeros(smpl.shape), smpl]) 
+                else:
+                    smpl_input = torch.cat([smpl, smpl]) 
+                smpl_input= F.interpolate(smpl, (h,w)).cuda()
+                # print('smpl_input_',smpl_input.shape)
+                # torch.Size([20, 3, 32, 32])
+                # print('latent_model_input',latent_model_input.shape)
+                # latent_model_input torch.Size([20, 4, 32, 32])
+                latent_model_input = torch.cat((latent_model_input.cuda(), smpl_input), 1)
+                # latent_model_input = self.conv_layer(latent_model_input)
+                '''
                 # controlnet(s) inference
                 if self.args.ref_null_caption: # null caption input for ref controlnet path
                     down_block_res_samples, mid_block_res_sample = self.controlnet(
@@ -753,14 +798,13 @@ class Net(nn.Module):
                         conditioning_scale=controlnet_conditioning_scale_ref,
                         return_dict=False,
                     )
+                '''
 
                 # predict the noise residual
                 noise_pred = self.unet(
                     latent_model_input,
                     t,
-                    encoder_hidden_states=refer_latents,
-                    down_block_additional_residuals=down_block_res_samples,
-                    mid_block_additional_residual=mid_block_res_sample).sample.to(dtype=self.dtype)
+                    encoder_hidden_states=refer_latents).sample.to(dtype=self.dtype)
 
                 # perform guidance
                 if do_classifier_free_guidance:
