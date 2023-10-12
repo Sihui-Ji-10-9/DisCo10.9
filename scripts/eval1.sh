@@ -11,6 +11,6 @@ python finetune_sdm_yaml.py \
 --val_yaml /HOME/HOME/jisihui/VITON-hd-resized/try1.0_same/tsv/val.yaml \
 --unet_unfreeze_type "all" \
 --ref_null_caption False \
---combine_clip_local --combine_use_mask --viton_hd --add_shape \
---stage1_pretrain_path /home/nfs/jsh/DisCo/exp/pretrain_1.3_hd/8799.pth/mp_rank_00_model_states.pt \
---eval_save_filename /home/nfs/jsh/DisCo/eval/eval_pt1.3_hd_same
+--combine_clip_local --combine_use_mask --viton_hd \
+--stage1_pretrain_path /home/nfs/jsh/DisCo/exp/pretrain_1.2_hd/8799.pth/mp_rank_00_model_states.pt \
+--eval_save_filename /home/nfs/jsh/DisCo/eval/eval_pt1.2_hd_same

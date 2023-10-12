@@ -106,12 +106,21 @@ class Net(nn.Module):
             new_config = dict(self.unet.config)
             new_config["sample_size"] = 64
             unet._internal_dict = FrozenDict(new_config)
-            # Modify input layer to have 1 additional input channels (pose)
-            weights = unet.conv_in.weight.clone()
-            unet.conv_in = nn.Conv2d(6, weights.shape[0], kernel_size=3, padding=(1, 1)) # input noise + n poses
-            with torch.no_grad():
-                unet.conv_in.weight[:, :4] = weights # original weights
-                unet.conv_in.weight[:, 4:] = torch.zeros(unet.conv_in.weight[:, 3:].shape) # new weights initialized to zero
+        
+        # Modify input layer to have 1 additional input channels (pose)
+        weights = unet.conv_in.weight.clone()
+        # print('weights',weights.shape)
+        # torch.Size([320, 4, 3, 3])
+        unet.conv_in = nn.Conv2d(7, weights.shape[0], kernel_size=3, padding=(1, 1)) # input noise + n poses
+        with torch.no_grad():
+            # print('unet.conv_in.weight',unet.conv_in.weight.shape)
+            # unet.conv_in.weight torch.Size([320, 7, 3, 3])
+            # print('[:, :4]',unet.conv_in.weight[:, :4].shape)
+            # torch.Size([320, 4, 3, 3])
+            unet.conv_in.weight[:, :4] = weights # original weights
+            # print('[:, 3:]',unet.conv_in.weight[:, 3:].shape)
+            # torch.Size([320, 4, 3, 3])
+            unet.conv_in.weight[:, 4:] = torch.zeros(unet.conv_in.weight[:, 4:].shape) # new weights initialized to zero
         
         if self.args.enable_xformers_memory_efficient_attention:
             if is_xformers_available():
@@ -122,6 +131,7 @@ class Net(nn.Module):
 
         # WT: initialize controlnet from the pretrained image variation SD model
         # controlnet_pose = ControlNetModel.from_unet(unet=unet, args=self.args)
+        '''
         if args.ref_null_caption:
             tokenizer = CLIPTokenizer.from_pretrained(self.args.sd15_path, subfolder="tokenizer")
             self.tokenizer = tokenizer
@@ -139,11 +149,11 @@ class Net(nn.Module):
             controlnet_background.enable_gradient_checkpointing()
         # controlnet_unit = MultiControlNetModel_MultiHiddenStates([controlnet_pose, controlnet_background])
         controlnet_unit = controlnet_background
-
+        '''
         self.tr_noise_scheduler = tr_noise_scheduler
         self.noise_scheduler = noise_scheduler
         self.vae = vae
-        self.controlnet = controlnet_unit
+        # self.controlnet = controlnet_unit
         self.unet = unet
         self.feature_extractor = feature_extractor
         self.clip_image_encoder = clip_image_encoder
@@ -565,16 +575,17 @@ class Net(nn.Module):
             reference_latents_controlnet = inputs["reference_img_controlnet"]
         # controlnet_image = [inputs["cond_imgs"], reference_latents_controlnet]  # [pose image, ref image]
         controlnet_image = reference_latents_controlnet  # [ref image]
-        smpl = torch.tensor(reference_latents_controlnet).cuda()
+        smpl = reference_latents_controlnet.clone().detach()
         # Concatenate pose with noise
         _, _, h, w = noisy_latents.shape
-        print('noisy_latents',noisy_latents.shape)
+        # print('noisy_latents',noisy_latents.shape)
         # torch.Size([64, 4, 32, 32])
-        print('smpl',smpl.shape)
+        # print('smpl',smpl.shape)
         # torch.Size([64, 3, 256, 256])
-        print('smpl2',F.interpolate(smpl, (h,w)).shape)
+        smpl_input = F.interpolate(smpl, (h,w)).cuda()
+        # print('smpl2',smpl_input.shape)
         # smpl2 torch.Size([64, 3, 32, 32])
-        noisy_latents = torch.cat((noisy_latents, F.interpolate(smpl, (h,w))), 1)
+        noisy_latents = torch.cat((noisy_latents.cuda(),smpl_input), 1)
         # noisy_latents = self.conv_layer(noisy_latents)
         # print('noisy_latents',noisy_latents.shape)
         # torch.Size([64, 4, 32, 32])
@@ -729,11 +740,10 @@ class Net(nn.Module):
             batch_size=b * self.args.num_inf_images_per_prompt,
             num_images_per_prompt=self.args.num_inf_images_per_prompt,
             device=self.device,
-            dtype=self.controlnet.dtype,
+            dtype=torch.float16,
             do_classifier_free_guidance=do_classifier_free_guidance,
         )
-        smpl= torch.tensor(reference_latents_controlnet).cuda()
-
+        smpl= reference_latents_controlnet.clone().detach()
         # Prepare timesteps
         self.noise_scheduler.set_timesteps(
             self.args.num_inference_steps, device=self.device)
@@ -768,7 +778,7 @@ class Net(nn.Module):
                 # Add pose to noisy latents
                 _, _, h, w = latent_model_input.shape
                 if do_classifier_free_guidance:
-                    smpl_input = torch.cat([torch.zeros(smpl.shape), smpl]) 
+                    smpl_input = torch.cat([torch.zeros(smpl.shape).cuda(), smpl]) 
                 else:
                     smpl_input = torch.cat([smpl, smpl]) 
                 smpl_input= F.interpolate(smpl, (h,w)).cuda()

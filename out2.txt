@@ -1,0 +1,29 @@
+ 1 [2023-10-09 19:53:23 <agent.py:1113> train_eval_by_iter] Train examples: 11647, image size [256, 256],
+ 2  Val examples: 10, 1
+ 3  epochs: 100, iters: 18100, 
+ 4  iter_per_ep: 181, eval_step: 200, save_step: 200,
+ 5  global_batch_size: 64, local_batch_size: 64.
+ 6 [2023-10-09 19:53:23 <agent.py:1113> train_eval_by_iter] Train examples: 11647, image size [256, 256],
+ 7  Val examples: 10, 1
+ 8  epochs: 100, iters: 18100, 
+ 9  iter_per_ep: 181, eval_step: 200, save_step: 200,
+10  global_batch_size: 64, local_batch_size: 64.
+11   0%|                                                                                                   | 0/18100 [00:00<?, ?it/s][2023-10-09 19:53:23 <agent.py:1145> train_eval_by_iter] Evaluating ZS...
+12 [2023-10-09 19:53:23 <agent.py:1145> train_eval_by_iter] Evaluating ZS...
+13   0%|                                                                                                       | 0/1 [00:00<?, ?it/s]
+14 Mode [transblocks]: There are 320 modules in unet to be set as requires_grad=True.
+15 [2023-10-09 19:53:40 <agent.py:562> get_eval_metrics] Failed to calculate FID, <urlopen error [SSL: CERTIFICATE_VERIFY_FAILED] certificate verify failed: unable to get local issuer certificate (_ssl.c:1108)>
+16 100%|███████████████████████████████████████████████████████████████████████████████████████████████| 1/1 [00:15<00:00, 15.35s/it]
+17 100%|███████████████████████████████████████████████████████████████████████████████████████████████| 1/1 [00:14<00:00, 14.89s/it]
+18 [2023-10-09 19:53:40 <agent.py:562> get_eval_metrics] Failed to calculate FID, <urlopen error [SSL: CERTIFICATE_VERIFY_FAILED] certificate verify failed: unable to get local issuer certificate (_ssl.c:1108)>
+19 [2023-10-09 19:53:41 <agent.py:587> get_eval_metrics] Failed to eval video gen, gt /home/nfs/jsh/DisCo/exp/pretrain1gpu/eval_visu/gt, True
+20 pred /home/nfs/jsh/DisCo/exp/pretrain1gpu/eval_visu/pred, False
+21 [2023-10-09 19:53:41 <agent.py:587> get_eval_metrics] Failed to eval video gen, gt /home/nfs/jsh/DisCo/exp/pretrain1gpu/eval_visu/gt, True
+22 pred /home/nfs/jsh/DisCo/exp/pretrain1gpu/eval_visu/pred, False
+23 [2023-10-09 19:53:41 <agent.py:1149> train_eval_by_iter] [Rank 0] Valid  before train. Time: 0:00:17.172982
+24  {}
+25 [2023-10-09 19:53:41 <agent.py:1149> train_eval_by_iter] [Rank 0] Valid  before train. Time: 0:00:17.172982
+26  {}
+27 Mode [transblocks]: There are 320 modules in unet to be set as requires_grad=True.
+28 Mode [transblocks]: There are 320 modules in unet to be set as requires_grad=True.
+29 Metering:{'loss_total': '0.1066'}:   0%|▏                                                   | 85/18100 [07:51<28:27:11,  5.69s/it]

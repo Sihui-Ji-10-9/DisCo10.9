@@ -690,7 +690,7 @@ class Net(nn.Module):
             reference_latents_controlnet = reference_latents_controlnet.to(dtype=self.dtype)
         else:
             reference_latents_controlnet = inputs['reference_img_controlnet'].to(dtype=self.dtype)
-
+        print('====',self.controlnet.dtype)
         reference_latents_controlnet = self.prepare_image(
             image=reference_latents_controlnet,
             width=w,
