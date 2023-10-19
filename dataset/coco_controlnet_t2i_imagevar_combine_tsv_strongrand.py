@@ -35,6 +35,9 @@ class BaseDataset(TsvCondImgCompositeDataset):
         if args.MPV3D:
             width=320
             height=512
+        self.width_base = width
+        self.height_base = height
+
         target_size = max(width, height)
         
         padding_left = (target_size - width) // 2
@@ -81,7 +84,11 @@ class BaseDataset(TsvCondImgCompositeDataset):
             transforms.Resize(self.clip_size, interpolation=transforms.InterpolationMode.BICUBIC),
             transforms.ToTensor(),
         ])
-
+        self.tensor_transforms = transforms.Compose(
+        [
+            transforms.Normalize([0.5], [0.5]),
+        ]
+        )
 
     def add_mask_to_img(self, img, mask, img_key): #pil, pil
         if not img.size == mask.size:
@@ -111,13 +118,14 @@ class BaseDataset(TsvCondImgCompositeDataset):
     def get_metadata(self, idx):
         img_idx = self.get_image_index(idx)
         img_key = self.image_keys[img_idx]
+        
+        
         # (caption_sample, tag, start,
         #  end, _) = self.get_caption_and_timeinfo_wrapper(
         #     img_idx, cap_idx)
         # get image or video frames
         # frames: (T, C, H, W),  is_video: binary tag
         img = self.get_img(img_idx)
-
         # if isinstance(caption_sample, dict):
         #     caption = caption_sample["caption"]
         # else:
@@ -146,6 +154,9 @@ class BaseDataset(TsvCondImgCompositeDataset):
                 meta_data['mask_img_ref'] = self.get_cloth_mask(img_idx)
         meta_data['img'] = img
         meta_data['smpl'] = self.get_smpl(img_idx)
+        meta_data['dp'] = self.get_dp(img_key)
+        # print('img',meta_data['img'])
+        # print('dp',meta_data['dp'])
         return meta_data
     
     def get_img(self, img_idx):
@@ -155,6 +166,18 @@ class BaseDataset(TsvCondImgCompositeDataset):
         except Exception as e:
             raise ValueError(
                     f"{e}, in get_img()")
+    def get_dp(self, img_key):
+        # print('self.dp_file',self.dp_file)
+        # /HOME/HOME/jisihui/VITON-hd-resized/try/densepose
+        dp_path=self.dp_file+'/'+img_key+'.npy'
+        if not os.path.exists(dp_path):
+            print('error!!')
+        # print(dp_path)
+        dp = F.interpolate(torch.from_numpy(np.load(dp_path).astype('float32')).unsqueeze(0), (self.height_base, self.width_base), mode='bilinear').squeeze(0)
+        dp = self.tensor_transforms(dp)
+        # print('before==',dp.shape)
+        # torch.Size([2, 1024, 768])
+        return dp
     def get_shape(self, img_idx):
         try:
             # print(img_idx)
@@ -223,7 +246,8 @@ class BaseDataset(TsvCondImgCompositeDataset):
         reference_img = raw_data['reference_img']
         img_key = raw_data['img_key']
         ref_img_key = raw_data['ref_img_key']
-
+        densepose = raw_data['dp']
+        # torch.Size([2, 1024, 768])
         # first check the size of the ref image
         ref_img_size = raw_data['reference_img'].size
         # if ref_img_size[0] > ref_img_size[1]: # width > height
@@ -261,7 +285,7 @@ class BaseDataset(TsvCondImgCompositeDataset):
             reference_img = reference_img * reference_img_mask# foreground
 
         # caption = raw_data['caption']
-        outputs = {'img_key':img_key, 'shape': shape,'label_imgs': img,  'reference_img': reference_img, 'reference_img_controlnet':reference_img_controlnet, 'reference_img_vae':reference_img_vae}
+        outputs = {'img_key':img_key, 'shape': shape,'label_imgs': img,  'densepose':densepose, 'reference_img': reference_img, 'reference_img_controlnet':reference_img_controlnet, 'reference_img_vae':reference_img_vae}
         if self.args.combine_use_mask:
             outputs['background_mask'] = (1 - reference_img_mask)
         if skeleton_img is not None:

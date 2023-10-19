@@ -107,6 +107,7 @@ class Args(object):
         parser.add_argument('--fix_dist_seed', type=str_to_bool,
                             nargs='?', const=True, default=False)
         parser.add_argument('--tiktok_data_root', default=None, type=str)
+        parser.add_argument('--npy_root', default=None, type=str)
         # parser.add_argument('--tiktok_ann_root', default=None, type=str)
 
         # input
@@ -185,6 +186,8 @@ class Args(object):
         parser.add_argument('--add_shape',  type=str_to_bool, 
                             nargs='?', const=True, default=False)
         parser.add_argument('--base',  type=str_to_bool, 
+                            nargs='?', const=True, default=False)
+        parser.add_argument('--densepose',  type=str_to_bool, 
                             nargs='?', const=True, default=False)
         parser.add_argument('--controlnet_conditioning_scale_cond', default=1.0, type=float)
         parser.add_argument('--controlnet_conditioning_scale_ref', default=1.0, type=float)

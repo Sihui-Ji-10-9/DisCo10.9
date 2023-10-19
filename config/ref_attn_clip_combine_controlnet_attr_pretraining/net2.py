@@ -781,7 +781,7 @@ class Net(nn.Module):
                     smpl_input = torch.cat([torch.zeros(smpl.shape).cuda(), smpl]) 
                 else:
                     smpl_input = torch.cat([smpl, smpl]) 
-                smpl_input= F.interpolate(smpl, (h,w)).cuda()
+                smpl_input= F.interpolate(smpl_input, (h,w)).cuda()
                 # print('smpl_input_',smpl_input.shape)
                 # torch.Size([20, 3, 32, 32])
                 # print('latent_model_input',latent_model_input.shape)

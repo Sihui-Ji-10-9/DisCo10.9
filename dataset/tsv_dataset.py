@@ -476,15 +476,20 @@ class TsvCompositeDataset(Dataset_Base):
         self.visual_file = self.cfg.get('img', None)
         self.cloth_file = self.cfg.get('cloth', None)
         self.cloth_mask_file = self.cfg.get('cloth_mask', None)
-        self.smpl_file = self.cfg.get('smpl', None)
+        self.smpl_file = self.cfg.get('img_densepose', None)
+        # if self.densepose:
+        #     self.smpl_file = self.cfg.get('img_densepose', None)
+        self.dp_file = self.cfg.get('densepose', None)
         self.shape_file = self.cfg.get('shape', None)
         self.img_mask_file = self.cfg.get('img_mask', None)
+
         self.visual_tsv = self.get_tsv_file(self.visual_file)
         self.shape_tsv = self.get_tsv_file(self.shape_file)
         self.cloth_tsv = self.get_tsv_file(self.cloth_file)
         self.cloth_mask_tsv = self.get_tsv_file(self.cloth_mask_file)
         self.img_mask_tsv = self.get_tsv_file(self.img_mask_file)
         self.smpl_tsv = self.get_tsv_file(self.smpl_file)
+        # self.dp_tsv = self.get_tsv_file(self.dp_file)
         self.label_file = self.cfg.get('label', None)
         self.label_tsv = self.get_tsv_file(self.label_file)
 

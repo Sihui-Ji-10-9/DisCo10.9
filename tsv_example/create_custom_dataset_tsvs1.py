@@ -13,7 +13,12 @@ import json, cv2, math, yaml
 import numpy as np
 import argparse
 from joblib import load
-
+from torchvision import transforms
+tensor_transforms = transforms.Compose(
+    [
+        transforms.Normalize([0.5], [0.5]),
+    ]
+)
 def write_to_yaml_file(context, file_name):
     with open(file_name, 'w') as fp:
         yaml.dump(context, fp, encoding='utf-8')
@@ -59,6 +64,12 @@ def load_pkl_paths(image_folder):
     frame_paths.sort()
     return frame_paths
 
+def load_npy_paths(image_folder):
+    frm_list = os.listdir(image_folder)
+    frame_paths = [ image_folder + '/' + frm_name for frm_name in frm_list if frm_name.endswith(".npy")]
+    frame_paths.sort()
+    return frame_paths
+
 def main(args):
     split = args.split 
     
@@ -68,7 +79,8 @@ def main(args):
     # cloth_mask_path_list = load_image_paths(os.path.join(args.root_folder,'cloth-mask'))
     smpl_img_path_list = load_image_paths(os.path.join(args.root_folder,'smpl'))
     smpl_pkl_path_list = load_pkl_paths(os.path.join(args.root_folder,'smpl'))
-
+    densepose_img_path_list = load_image_paths(os.path.join(args.root_folder,'image-densepose'))
+    npy_path_list = load_npy_paths(os.path.join(args.root_folder,'densepose'))
 
     # if args.debug:
     #     image_path_list = image_path_list[:10]
@@ -125,6 +137,25 @@ def main(args):
             yield(row)
     if args.smpl:
         tsv_writer(gen_row(smpl_img_path_list), f"{args.output_folder}/{split}_smpl.tsv")
+
+    ###############################################################################
+    # process densepose.tsv
+    if args.densepose:
+        print('generating densepose.tsv')
+    def gen_row(image_path_list):
+        for i, image_path in enumerate(image_path_list):
+            if i % 100 == 0:
+                print(f"{i}/{len(image_path_list)}")
+            image_name = image_path.split("/")[-1]
+            # print(image_name)
+            image = load_image(image_path)
+            if image is None:
+                print(f"image does not exists: {image_path}")
+                continue
+            row = [image_name, encoded_from_img(image)]
+            yield(row)
+    if args.densepose:
+        tsv_writer(gen_row(densepose_img_path_list), f"{args.output_folder}/{split}_densepose.tsv")
     ###############################################################################
     
     # process caption.tsv
@@ -312,7 +343,7 @@ def main(args):
     
     ###############################################################################
     
-    # process vid2line.tsv
+    # process shape.tsv
     if args.shape:
         print('generating shape.tsv')
     
@@ -333,10 +364,36 @@ def main(args):
         tsv_writer(gen_vis2line_row(smpl_pkl_path_list), f"{args.output_folder}/{split}_shape.tsv")
     
     ###############################################################################
+    '''
+    # process densepose.tsv
+    if args.densepose:
+        print('generating densepose.tsv')
     
+    def gen_vis2line_row(image_path_list):
+        for i, image_path in enumerate(image_path_list):
+            if i % 100 == 0:
+                print(f"{i}/{len(image_path_list)}")
+            image_name = image_path.split("/")[-1]
+            # image = load_image(f"./tiktok_datasets/{image_path}")
+            # if image is None:
+            #     print(f"image does not exists: {image_path}")
+            #     continue
+            dp = torch.from_numpy(np.load(image_path).astype('float16')).unsqueeze(0)
+            trans_dp=tensor_transforms(dp)
+            # npdp=np.array(trans_dp)
+            # dp = list(trans_dp)
+            # print(npdp.shape)
+            # dp2np = np.array(dp)
+            # print(dp2np.shape)
+            row = [image_name, trans_dp]
+            yield(row)
+    if args.densepose:
+        tsv_writer(gen_vis2line_row(npy_path_list), f"{args.output_folder}/{split}_densepose.tsv")
+    '''
+    ###############################################################################
     # process yaml file
 
-    all_field = ['img','img_mask','shape','smpl','cloth','cloth_mask','caption']
+    all_field = ['img','img_mask','shape','smpl','cloth','cloth_mask','caption','densepose']
     out_cfg = {'composite': False}
 
     for field in all_field:
@@ -376,6 +433,8 @@ if __name__ == '__main__':
     parser.add_argument('--smpl',  type=str_to_bool,
                             nargs='?', const=True, default=False)
     parser.add_argument('--caption',  type=str_to_bool,
+                            nargs='?', const=True, default=False)
+    parser.add_argument('--densepose',  type=str_to_bool,
                             nargs='?', const=True, default=False)
     args = parser.parse_args()
     main(args)
