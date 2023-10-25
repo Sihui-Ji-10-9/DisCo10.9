@@ -146,14 +146,16 @@ class BaseDataset(TsvCondImgCompositeDataset):
             meta_data['reference_img'] = img
         else:
             meta_data['reference_img'] = self.get_cloth(img_idx)
-        meta_data['shape'] = self.get_shape(img_idx)
+        if self.args.add_shape:
+            meta_data['shape'] = self.get_shape(img_idx)
         if self.args.combine_use_mask:
             if self.args.base:
                 meta_data['mask_img_ref'] = self.get_img_mask(img_idx)
             else:
                 meta_data['mask_img_ref'] = self.get_cloth_mask(img_idx)
         meta_data['img'] = img
-        meta_data['smpl'] = self.get_smpl(img_idx)
+        if not self.args.no_smpl:
+            meta_data['smpl'] = self.get_smpl(img_idx)
         meta_data['dp'] = self.get_dp(img_key)
         # print('img',meta_data['img'])
         # print('dp',meta_data['dp'])
@@ -241,7 +243,8 @@ class BaseDataset(TsvCondImgCompositeDataset):
 
         raw_data = self.get_metadata(idx)
         img = raw_data['img']
-        shape = raw_data['shape']
+        if self.args.add_shape:
+            shape = raw_data['shape']
         skeleton_img = raw_data['pose_img']
         reference_img = raw_data['reference_img']
         img_key = raw_data['img_key']
@@ -256,8 +259,10 @@ class BaseDataset(TsvCondImgCompositeDataset):
         #     transform1 = self.random_square_height
         # else:
         transform1 = None
-
-        reference_img_controlnet = raw_data['smpl']
+        if not self.args.no_smpl:
+            reference_img_controlnet = raw_data['smpl']
+        else:
+            reference_img_controlnet = raw_data['img']
         state = torch.get_rng_state()
         img = self.augmentation(img, transform1, self.transform, state)
         if skeleton_img is not None:
@@ -285,10 +290,12 @@ class BaseDataset(TsvCondImgCompositeDataset):
             reference_img = reference_img * reference_img_mask# foreground
 
         # caption = raw_data['caption']
-        outputs = {'img_key':img_key, 'shape': shape,'label_imgs': img,  'densepose':densepose, 'reference_img': reference_img, 'reference_img_controlnet':reference_img_controlnet, 'reference_img_vae':reference_img_vae}
+        outputs = {'img_key':img_key, 'label_imgs': img,  'densepose':densepose, 'reference_img': reference_img, 'reference_img_controlnet':reference_img_controlnet, 'reference_img_vae':reference_img_vae}
         if self.args.combine_use_mask:
             outputs['background_mask'] = (1 - reference_img_mask)
         if skeleton_img is not None:
             outputs.update({'cond_imgs': skeleton_img})
-
+        if self.args.add_shape:
+            outputs.update({'shape': shape})
+        
         return outputs

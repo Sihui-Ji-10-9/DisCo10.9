@@ -2,7 +2,7 @@ PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION=python AZFUSE_USE_FUSE=0 QD_USE_LINEIDX_8
 --cf config/ref_attn_clip_combine_controlnet_attr_pretraining/coco_S256_xformers_tsv_strongrand3.py \
 --do_train --root_dir /home/nfs/jsh/DisCo \
 --local_train_batch_size 64 --local_eval_batch_size 64 --log_dir exp/pretrain_3.0_1 \
---epochs 200 --deepspeed --eval_step 500 --save_step 200 --gradient_accumulate_steps 1 \
+--epochs 200 --deepspeed --eval_step 500 --save_step 500 --gradient_accumulate_steps 1 \
 --learning_rate 1e-3 --fix_dist_seed --loss_target "noise" \
 --train_yaml /HOME/HOME/jisihui/VITON-hd-resized/train/tsv/train.yaml \
 --val_yaml /HOME/HOME/jisihui/VITON-hd-resized/try/tsv/val.yaml \

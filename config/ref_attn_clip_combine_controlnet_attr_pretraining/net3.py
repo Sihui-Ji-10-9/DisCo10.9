@@ -490,6 +490,8 @@ class Net(nn.Module):
             self, batch_size, num_channels_latents,
             height, width, generator, latents=None):
         shape = (batch_size, num_channels_latents, height // self.vae_scale_factor, width // self.vae_scale_factor)
+        # print('===batch_size',batch_size)
+        # ===batch_size 10
         if isinstance(generator, list) and len(generator) != batch_size:
             raise ValueError(
                 f"You have passed a list of generators of length {len(generator)}, but requested an effective batch"
@@ -498,6 +500,7 @@ class Net(nn.Module):
 
         if latents is None:
             if isinstance(generator, list):
+                # print('===1')
                 shape = (1,) + shape[1:]
                 latents = [
                     torch.randn(shape, generator=generator[i], dtype=self.dtype)
@@ -505,6 +508,8 @@ class Net(nn.Module):
                 ]
                 latents = torch.cat(latents, dim=0).to(self.device)
             else:
+                # print('===2')
+                # here!
                 latents = torch.randn(shape, generator=generator, device=self.device, dtype=self.dtype)
         else:
             if latents.shape != shape:
@@ -515,6 +520,42 @@ class Net(nn.Module):
         latents = latents * self.noise_scheduler.init_noise_sigma
         return latents
 
+    def prepare_latents_fix(
+            self, batch_size, num_channels_latents,
+            height, width, generator, latents=None):
+        shape = (1, num_channels_latents, height // self.vae_scale_factor, width // self.vae_scale_factor)
+        # print('===batch_size',batch_size)
+        # ===batch_size 10
+        if isinstance(generator, list) and len(generator) != batch_size:
+            raise ValueError(
+                f"You have passed a list of generators of length {len(generator)}, but requested an effective batch"
+                f" size of {batch_size}. Make sure the batch size matches the length of the generators."
+            )
+
+        if latents is None:
+            if isinstance(generator, list):
+                # print('===1')
+                shape = (1,) + shape[1:]
+                latents = [
+                    torch.randn(shape, generator=generator[i], dtype=self.dtype)
+                    for i in range(batch_size)
+                ]
+                latents = torch.cat(latents, dim=0).to(self.device)
+            else:
+                print('===2')
+                # here!
+                latents = torch.randn(shape, generator=generator, device=self.device, dtype=self.dtype)
+                latents = latents.repeat(batch_size,1,1,1)
+                # from IPython import embed; embed()
+        else:
+            if latents.shape != shape:
+                raise ValueError(f"Unexpected latents shape, got {latents.shape}, expected {shape}")
+            latents = latents.to(device=self.device, dtype=self.dtype)
+
+        # scale the initial noise by the standard deviation required by the scheduler
+        latents = latents * self.noise_scheduler.init_noise_sigma
+        return latents
+    
     def forward_train_multicontrol(self, inputs, outputs):
         # # use CFG
         # if self.args.drop_ref > 0:
@@ -774,7 +815,7 @@ class Net(nn.Module):
         gen_width = w
         generator = inputs['generator']
 
-        latents = self.prepare_latents(
+        latents0 = self.prepare_latents(
             b * self.args.num_inf_images_per_prompt,
             num_channels_latents,
             gen_height,
@@ -782,7 +823,21 @@ class Net(nn.Module):
             generator,
             latents=None,
         )
-
+        latents = self.prepare_latents_fix(
+            b * self.args.num_inf_images_per_prompt,
+            num_channels_latents,
+            gen_height,
+            gen_width,
+            generator,
+            latents=None,
+        )
+        print('latents',latents[0][0][0])
+        print('latents',latents[1][0][0])
+        print('latents',latents[8][0][0])
+        print('latents',latents0[0][0][0])
+        print('latents',latents0[1][0][0])
+        print('latents',latents0[8][0][0])
+        print('===latents',latents.shape)
         # Prepare extra step kwargs.
         extra_step_kwargs = self.prepare_extra_step_kwargs(generator)
 

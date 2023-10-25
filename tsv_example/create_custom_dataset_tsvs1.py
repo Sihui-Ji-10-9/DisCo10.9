@@ -73,14 +73,13 @@ def load_npy_paths(image_folder):
 def main(args):
     split = args.split 
     
-    # image_path_list = load_image_paths(os.path.join(args.root_folder,'image'))
-    # cloth_path_list = load_image_paths(os.path.join(args.root_folder,'cloth'))
-    # image_mask_path_list = load_image_paths(os.path.join(args.root_folder,'image-parse-v3'))
-    # cloth_mask_path_list = load_image_paths(os.path.join(args.root_folder,'cloth-mask'))
-    smpl_img_path_list = load_image_paths(os.path.join(args.root_folder,'smpl'))
-    smpl_pkl_path_list = load_pkl_paths(os.path.join(args.root_folder,'smpl'))
-    densepose_img_path_list = load_image_paths(os.path.join(args.root_folder,'image-densepose'))
-    npy_path_list = load_npy_paths(os.path.join(args.root_folder,'densepose'))
+    image_path_list = load_image_paths(os.path.join(args.root_folder,'image'))
+    cloth_path_list = load_image_paths(os.path.join(args.root_folder,'cloth'))
+    image_mask_path_list = load_image_paths(os.path.join(args.root_folder,'image-parse-v3'))
+    cloth_mask_path_list = load_image_paths(os.path.join(args.root_folder,'cloth-mask'))
+    # smpl_img_path_list = load_image_paths(os.path.join(args.root_folder,'smpl_new'))
+    # smpl_pkl_path_list = load_pkl_paths(os.path.join(args.root_folder,'smpl'))
+    # densepose_img_path_list = load_image_paths(os.path.join(args.root_folder,'image-densepose'))
 
     # if args.debug:
     #     image_path_list = image_path_list[:10]
@@ -136,7 +135,7 @@ def main(args):
             row = [image_name, encoded_from_img(image)]
             yield(row)
     if args.smpl:
-        tsv_writer(gen_row(smpl_img_path_list), f"{args.output_folder}/{split}_smpl.tsv")
+        tsv_writer(gen_row(smpl_img_path_list), f"{args.output_folder}/{split}_smpl_new.tsv")
 
     ###############################################################################
     # process densepose.tsv
@@ -392,15 +391,15 @@ def main(args):
     '''
     ###############################################################################
     # process yaml file
+    if args.yaml:
+        all_field = ['img','img_mask','shape','smpl','cloth','cloth_mask','caption','img_densepose']
+        out_cfg = {'composite': False}
 
-    all_field = ['img','img_mask','shape','smpl','cloth','cloth_mask','caption','densepose']
-    out_cfg = {'composite': False}
+        for field in all_field:
+            tsvfilename = f'{args.split}_{field}.tsv'
+            out_cfg[field] = tsvfilename
 
-    for field in all_field:
-        tsvfilename = f'{args.split}_{field}.tsv'
-        out_cfg[field] = tsvfilename
-
-    write_to_yaml_file(out_cfg, os.path.join(args.output_folder, args.split + '.yaml'))
+        write_to_yaml_file(out_cfg, os.path.join(args.output_folder, args.split + '.yaml'))
 
 def str_to_bool(value):
     if value.lower() in {'false', 'f', '0', 'no', 'n'}:
@@ -435,6 +434,8 @@ if __name__ == '__main__':
     parser.add_argument('--caption',  type=str_to_bool,
                             nargs='?', const=True, default=False)
     parser.add_argument('--densepose',  type=str_to_bool,
+                            nargs='?', const=True, default=False)
+    parser.add_argument('--yaml',  type=str_to_bool,
                             nargs='?', const=True, default=False)
     args = parser.parse_args()
     main(args)
