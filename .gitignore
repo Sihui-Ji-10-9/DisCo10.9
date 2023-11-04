@@ -74,3 +74,5 @@ docs/_build/
 /exp/
 /wandb/
 /eval/
+/dinov2/
+/dino_v2/
