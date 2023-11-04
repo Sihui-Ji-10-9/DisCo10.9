@@ -11,6 +11,7 @@ import torch
 import random
 from packaging import version
 from transformers import CLIPTokenizer, CLIPVisionModelWithProjection, CLIPImageProcessor, CLIPTextModel
+from transformers import AutoImageProcessor, AutoModel
 from tqdm.auto import tqdm
 
 from diffusers.configuration_utils import FrozenDict
@@ -52,20 +53,26 @@ class Net(nn.Module):
         # print('====',args.pretrained_model_path)
         
         print('Loading CLIP image encoder')
-        feature_extractor = CLIPImageProcessor.from_pretrained(args.pretrained_model_path, subfolder="feature_extractor")
+        # feature_extractor = CLIPImageProcessor.from_pretrained(args.pretrained_model_path, subfolder="feature_extractor")
+        feature_extractor = AutoImageProcessor.from_pretrained('/home/nfs/jsh/DisCo/huggingface/hub/models--facebook--dinov2-large/snapshots/47b73eefe95e8d44ec3623f8890bd894b6ea2d6c', crop_size={'height': args.img_full_size[0], 'width': args.img_full_size[0]})
         print(f"Loading pre-trained image_encoder from {args.pretrained_model_path}/image_encoder")
-        clip_image_encoder = CLIPVisionModelWithProjection.from_pretrained(args.pretrained_model_path, subfolder="image_encoder")
-        if self.args.use_dinov2:
-            print(f'Loading DINOv2 image encoder, version {self.args.dinov2_version}')
-            dinov2_image_encoder = get_dinov2_model(self.args.dinov2_model_path, version=self.args.dinov2_version, pretrained=False)
-            self.dinov2_head = nn.Linear(1536, 768)
-            self.dinov2_head.requires_grad_(True)
-            # dinov2_head = nn.Linear(1536, 768)
-            # both 32
-            # print('---00--dinov2_head',next(self.dinov2_head.parameters()).dtype) 
-            # print('---00--dinov2_head',next(dinov2_head.parameters()).dtype) 
-
+        # clip_image_encoder = CLIPVisionModelWithProjection.from_pretrained(args.pretrained_model_path, subfolder="image_encoder")
         
+        print(f'Loading DINOv2 image encoder, version {self.args.dinov2_version}')
+        # clip_image_encoder = AutoModel.from_pretrained('facebook/dinov2-large')
+        clip_image_encoder = AutoModel.from_pretrained('/home/nfs/jsh/DisCo/huggingface/hub/models--facebook--dinov2-large/snapshots/47b73eefe95e8d44ec3623f8890bd894b6ea2d6c')
+        # clip_image_encoder = AutoModel.from_pretrained('/mnt_group/yuer.qian/pretrain_model/huggingface/dinov2_tryon_19m_20ep_vitl14')
+
+        # dinov2_image_encoder = get_dinov2_model(self.args.dinov2_model_path, version=self.args.dinov2_version, pretrained=False)
+        
+        # clip_image_encoder = torch.hub.load('facebookresearch/dinov2', self.args.dinov2_version, pretrained=False)
+        # clip_model_path = os.path.join(self.args.dinov2_model_path, self.args.dinov2_version + '_pretrain.pth')
+        # clip_image_encoder.load_state_dict(torch.load(clip_model_path), strict=True)
+
+
+        # self.dinov2_head = nn.Linear(1536, 768)
+        # self.dinov2_head.requires_grad_(True)
+
         print(f"Loading pre-trained vae from {args.pretrained_model_path}/vae")
         vae = AutoencoderKL.from_pretrained(
             args.pretrained_model_path, subfolder="vae")
@@ -171,8 +178,6 @@ class Net(nn.Module):
         self.unet = unet
         self.feature_extractor = feature_extractor
         self.clip_image_encoder = clip_image_encoder
-        if self.args.use_dinov2:
-            self.dinov2_image_encoder = dinov2_image_encoder
         self.vae_scale_factor = 2 ** (len(self.vae.config.block_out_channels) - 1)
 
         self.drop_text_prob = args.drop_text
@@ -185,11 +190,14 @@ class Net(nn.Module):
         self.controlnet_conditioning_scale_cond = getattr(self.args, "controlnet_conditioning_scale_cond", 1.0)
         self.controlnet_conditioning_scale_ref = getattr(self.args, "controlnet_conditioning_scale_ref", 1.0)
 
-        if not args.use_dinov2:
-            if getattr(self.args, 'combine_clip_local', None) and not getattr(self.args, 'refer_clip_proj', None): # not use clip pretrained visual projection (but initialize from it)
-                self.refer_clip_proj = torch.nn.Linear(clip_image_encoder.visual_projection.in_features, clip_image_encoder.visual_projection.out_features, bias=False)
-                self.refer_clip_proj.load_state_dict(clip_image_encoder.visual_projection.state_dict())
-                self.refer_clip_proj.requires_grad_(True)
+        
+        if getattr(self.args, 'combine_clip_local', None) and not getattr(self.args, 'refer_clip_proj', None): # not use clip pretrained visual projection (but initialize from it)
+            # self.refer_clip_proj = torch.nn.Linear(clip_image_encoder.visual_projection.in_features, clip_image_encoder.visual_projection.out_features, bias=False)
+            # self.refer_clip_proj.load_state_dict(clip_image_encoder.visual_projection.state_dict())
+            self.refer_clip_proj = nn.Sequential(
+                                nn.Linear(1024, 768),
+                                nn.LayerNorm(768))
+            self.refer_clip_proj.requires_grad_(True)
         if args.add_shape:
             self.cc_projection1 = nn.Linear(10,1000)
             self.relu = nn.ReLU()
@@ -264,10 +272,6 @@ class Net(nn.Module):
         self.clip_image_encoder.eval()
         self.vae.requires_grad_(False)
         self.clip_image_encoder.requires_grad_(False)
-        if self.args.use_dinov2:
-            self.dinov2_image_encoder.eval()
-            self.dinov2_image_encoder.requires_grad_(False)
-
         if hasattr(self, 'text_encoder'):
             self.text_encoder.eval()
             self.text_encoder.requires_grad_(False)
@@ -277,8 +281,6 @@ class Net(nn.Module):
         self.device = next(self.parameters()).device
         self.dtype = next(self.unet.parameters()).dtype
         self.clip_image_encoder.float()
-        if self.args.use_dinov2:
-            self.dinov2_image_encoder.float()
         if hasattr(self, 'text_encoder'):
             self.text_encoder.float()
         # self.refer_clip_proj.float()
@@ -289,8 +291,6 @@ class Net(nn.Module):
         super().half(*args, **kwargs)
         self.dtype = torch.float16
         self.clip_image_encoder.float()
-        if self.args.use_dinov2:
-            self.dinov2_image_encoder.float()
         if hasattr(self, 'text_encoder'):
             self.text_encoder.float()
         # self.refer_clip_proj.float()
@@ -463,8 +463,8 @@ class Net(nn.Module):
 
         image = image.to(device=self.device, dtype=dtype)
         last_hidden_states = self.clip_image_encoder(image).last_hidden_state
-        last_hidden_states_norm = self.clip_image_encoder.vision_model.post_layernorm(last_hidden_states)
-
+        last_hidden_states_norm = last_hidden_states #self.clip_image_encoder.vision_model.post_layernorm(last_hidden_states)
+        # print('====',last_hidden_states_norm.shape) === torch.Size([4, 257, 1024]) 
         if self.args.refer_clip_proj: # directly use clip pretrained projection layer
             image_embeddings = self.clip_image_encoder.visual_projection(last_hidden_states_norm)
         else:
@@ -484,52 +484,7 @@ class Net(nn.Module):
             # to avoid doing two forward passes
             image_embeddings = torch.cat([negative_prompt_embeds, image_embeddings])
 
-        return image_embeddings.to(dtype=self.dtype)
-
-    def dinov2_encode_image(self, image, num_images_per_prompt=1, do_classifier_free_guidance=False):
-        assert self.args.use_dinov2 == True
-        dtype = next(self.dinov2_image_encoder.parameters()).dtype
-        # print('==1dtype',dtype)
-        # ==1dtype torch.float32
-        image = image.to(device=self.device, dtype=dtype)
-        outputs = self.dinov2_image_encoder(image, is_training=True)
-        x_norm_clstoken = outputs['x_norm_clstoken'].unsqueeze(1) # (bs, 1, 1536)
-        x_norm_patchtokens = outputs['x_norm_patchtokens']
-        x_all_tokens = torch.cat([x_norm_clstoken, x_norm_patchtokens], dim=1).to(dtype=torch.float16)# (bs, 257, 1536)
-        # x_all_tokens = torch.cat([x_norm_clstoken, x_norm_patchtokens], dim=1)
-        
-        # for name, param in self.dinov2_head.named_parameters():
-        #     if param.requires_grad:
-        #         print(name, param.shape,param.dtype)
-        # torch.float16
-        # print('==2dtype',x_all_tokens.dtype)
-        # torch.float32
-        # project the output embeddings to the same dimension as CLIP(768)
- 
-        # torch.float32
-        # from IPython import embed; embed()
-        x_all_tokens = self.dinov2_head(x_all_tokens) # (bs, 257, 768)
-        # print('==x_all_tokens',x_all_tokens.shape)
-        # x_all_tokens torch.Size([5, 257, 768])    
-        # from IPython import embed; embed()
-        # duplicate image embeddings for each generation per prompt, using mps friendly method
-        bs_embed, seq_len, _ = x_all_tokens.shape
-        x_all_tokens = x_all_tokens.repeat(1, num_images_per_prompt, 1)
-        x_all_tokens = x_all_tokens.view(bs_embed * num_images_per_prompt, seq_len, -1)
-
-        if do_classifier_free_guidance:
-            # if self.args.cfg_zero_image_first: # encode zero-image as condition
-            #     raise NotImplementedError
-            # else: # simply use zero-initialized tensor as condition
-            negative_prompt_embeds = torch.zeros_like(x_all_tokens)
-
-            # For classifier free guidance, we need to do two forward passes.
-            # Here we concatenate the unconditional and text embeddings into a single batch
-            # to avoid doing two forward passes
-            x_all_tokens = torch.cat([negative_prompt_embeds, x_all_tokens])
-
-        return x_all_tokens.to(dtype=self.dtype)
-    
+        return image_embeddings.to(dtype=self.dtype)    
     def decode_latents(self, latents):
         latents = 1 / 0.18215 * latents
         image = self.vae.decode(latents).sample
@@ -644,13 +599,10 @@ class Net(nn.Module):
             z_text = self.text_encode(text)
 
         # text SD input --> reference image input (clip global embedding)
-        if not self.args.use_dinov2:
-            if self.args.combine_clip_local:
-                refer_latents = self.clip_encode_image_local(ref_image).to(dtype=self.dtype)
-            else:
-                refer_latents = self.clip_encode_image_global(ref_image).to(dtype=self.dtype)
+        if self.args.combine_clip_local:
+            refer_latents = self.clip_encode_image_local(ref_image).to(dtype=self.dtype)
         else:
-            refer_latents = self.dinov2_encode_image(ref_image).to(dtype=self.dtype)
+            refer_latents = self.clip_encode_image_global(ref_image).to(dtype=self.dtype)
         if self.args.add_shape:
             shape =torch.tensor([eval(s) for s in inputs['shape']])
             shape =shape[:,None,:].to(memory_format=torch.contiguous_format).float()
@@ -820,13 +772,12 @@ class Net(nn.Module):
         # print(refer_latents.shape) ([5, 257, 768])
         # from IPython import embed; embed()
         '''
-        if not self.args.use_dinov2:
-            if self.args.combine_clip_local:
-                refer_latents = self.clip_encode_image_local(ref_image, self.args.num_inf_images_per_prompt, do_classifier_free_guidance)
-            else:
-                refer_latents = self.clip_encode_image_global(ref_image, self.args.num_inf_images_per_prompt, do_classifier_free_guidance)
+        
+        if self.args.combine_clip_local:
+            refer_latents = self.clip_encode_image_local(ref_image, self.args.num_inf_images_per_prompt, do_classifier_free_guidance)
         else:
-            refer_latents = self.dinov2_encode_image(ref_image, self.args.num_inf_images_per_prompt, do_classifier_free_guidance)
+            refer_latents = self.clip_encode_image_global(ref_image, self.args.num_inf_images_per_prompt, do_classifier_free_guidance)
+     
         if self.args.ref_null_caption: # test must use null caption
             text = inputs['input_text']
             text = ["" for i in text]

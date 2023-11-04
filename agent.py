@@ -978,6 +978,10 @@ class Agent():
             # for LDM only
             logger.warning('Init ddpm and freeze cond_model/first_stage_vqe_model.')
             self.model.init_ddpm()
+            # 打印网络中的训练参数
+            # for name, param in self.model.named_parameters():
+            #     if param.requires_grad:
+            #         print(name, param.shape,param.dtype)
         self.move_model_to_cuda()
         self.prepare_dist_model()
             

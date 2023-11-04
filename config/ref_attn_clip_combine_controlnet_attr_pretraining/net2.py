@@ -694,12 +694,20 @@ class Net(nn.Module):
             if do_classifier_free_guidance:
                 zero_shape = torch.zeros_like(shape)
                 shape = torch.cat([zero_shape, shape])
+                # print('shape0',shape.dtype)
+                # shape0 torch.float16
                 shape = shape.to(device=self.device,dtype=self.dtype)
+                # print(self.dtype) torch.float16
+                # print('shape1',shape.dtype) torch.float16
+                from IPython import embed; embed()
             # print('=====',shape.shape,refer_latents.shape) 
             # torch.Size([20, 1, 10]) torch.Size([20, 257, 768])
             with torch.enable_grad():
+                # print('shape0',shape.dtype)
+                # torch.float16
                 shape = self.cc_projection1(shape)
-                # print('shape1',shape.shape)
+                # print('shape1',shape.dtype)
+                # torch.float16
                 # shape1 torch.Size([20, 1, 1000])
                 shape = self.relu(shape)
                 shape = self.cc_projection2(shape)

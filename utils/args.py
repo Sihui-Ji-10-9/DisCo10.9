@@ -141,6 +141,8 @@ class Args(object):
         parser.add_argument("--x0_steps", default=200,  type=int,
                             help="steps to calc x0 loss")
         parser.add_argument('--pretrained_model_path', default='/home/nfs/jsh/DisCo/diffusers/sd-image-variations-diffusers', type=str)
+        parser.add_argument('--dinov2_model_path', default='/home/nfs/jsh/DisCo/dinov2', type=str)
+        parser.add_argument('--dinov2_version', default='dinov2_vitg14', type=str)
 
         # training configs
         parser.add_argument("--num_workers", default=4,  type=int,
@@ -187,8 +189,6 @@ class Args(object):
                             nargs='?', const=True, default=False)
         parser.add_argument('--base',  type=str_to_bool, 
                             nargs='?', const=True, default=False)
-        parser.add_argument('--densepose',  type=str_to_bool, 
-                            nargs='?', const=True, default=False)
         parser.add_argument('--no_smpl',  type=str_to_bool, 
                             nargs='?', const=True, default=False)
         parser.add_argument('--controlnet_conditioning_scale_cond', default=1.0, type=float)
@@ -202,6 +202,10 @@ class Args(object):
         #     required=False, help="img transform")
         # parser.add_argument('--logging_steps', type=int, default=20,
         #                     help="log memory usage per X steps")
+        
+        ### reference image encoder
+        parser.add_argument('--use_dinov2', type=str_to_bool,
+                            nargs='?', const=True, default=False, help="if use dinov2 as reference image encoder")
         
         ### reference image attention
         parser.add_argument("--unet_unfreeze_type", default=None,  type=str, # if set --freeze_unet=False, will ft all the unet
