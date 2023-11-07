@@ -460,7 +460,7 @@ class Net(nn.Module):
         # torch.float32
         if not isinstance(image, torch.Tensor):
             image = self.feature_extractor(images=image, return_tensors="pt").pixel_values
-
+            # print('=========================!') no use
         image = image.to(device=self.device, dtype=dtype)
         last_hidden_states = self.clip_image_encoder(image).last_hidden_state
         last_hidden_states_norm = last_hidden_states #self.clip_image_encoder.vision_model.post_layernorm(last_hidden_states)

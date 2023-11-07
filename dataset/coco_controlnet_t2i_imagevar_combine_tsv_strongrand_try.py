@@ -8,7 +8,7 @@ from dataset.tsv_cond_dataset import TsvCondImgCompositeDataset
 class BaseDataset(TsvCondImgCompositeDataset):
     def __init__(self, args, yaml_file, split='train', preprocesser=None):
         self.img_size = getattr(args, 'img_full_size', args.img_size)
-        self.clip_size = (224,224)
+        # self.clip_size = (224,224)
         self.basic_root_dir = BasicArgs.root_dir
         self.max_video_len = args.max_video_len
         assert self.max_video_len == 1
@@ -44,13 +44,14 @@ class BaseDataset(TsvCondImgCompositeDataset):
         padding_top = (target_size - height) // 2
         padding_right = target_size - width - padding_left
         padding_bottom = target_size - height - padding_top
+        print('=======self.img_size',self.img_size)
         self.transform = transforms.Compose([
             # transforms.RandomResizedCrop(
             #     self.img_size,
             #     scale=(min_crop_scale, 1.0), ratio=(1., 1.),
             #     interpolation=transforms.InterpolationMode.BILINEAR),
             # transforms.Pad((padding_left, padding_top, padding_right, padding_bottom), padding_mode="edge"),
-            # transforms.Resize(self.img_size, interpolation=transforms.InterpolationMode.BILINEAR),
+            transforms.Resize(self.img_size, interpolation=transforms.InterpolationMode.BILINEAR),
             transforms.ToTensor(),
             transforms.Normalize([0.5], [0.5]),
         ])
@@ -60,14 +61,14 @@ class BaseDataset(TsvCondImgCompositeDataset):
             #     scale=(min_crop_scale, 1.0), ratio=(1., 1.),
             #     interpolation=transforms.InterpolationMode.BILINEAR),
             # transforms.Pad((padding_left, padding_top, padding_right, padding_bottom), padding_mode="edge"),
-            # transforms.Resize(self.img_size, interpolation=transforms.InterpolationMode.BILINEAR),
+            transforms.Resize(self.img_size, interpolation=transforms.InterpolationMode.BILINEAR),
             transforms.ToTensor(),
         ])
 
         self.ref_transform = transforms.Compose([ # follow CLIP transform
             transforms.ToTensor(),
             # transforms.Pad((padding_left, padding_top, padding_right, padding_bottom), padding_mode="edge"),
-            # transforms.Resize(self.clip_size, interpolation=transforms.InterpolationMode.BICUBIC),
+            transforms.Resize(self.img_size, interpolation=transforms.InterpolationMode.BICUBIC),
             # transforms.RandomResizedCrop(
             #     (224, 224),
             #     scale=(min_crop_scale, 1.0), ratio=(1., 1.),
@@ -81,7 +82,7 @@ class BaseDataset(TsvCondImgCompositeDataset):
             #     scale=(min_crop_scale, 1.0), ratio=(1., 1.),
             #     interpolation=transforms.InterpolationMode.BICUBIC),
             # transforms.Pad((padding_left, padding_top, padding_right, padding_bottom), padding_mode="edge"),
-            # transforms.Resize(self.clip_size, interpolation=transforms.InterpolationMode.BICUBIC),
+            transforms.Resize(self.img_size, interpolation=transforms.InterpolationMode.BICUBIC),
             transforms.ToTensor(),
         ])
         self.tensor_transforms = transforms.Compose(
