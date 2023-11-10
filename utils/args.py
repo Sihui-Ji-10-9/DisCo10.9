@@ -191,6 +191,8 @@ class Args(object):
                             nargs='?', const=True, default=False)
         parser.add_argument('--no_smpl',  type=str_to_bool, 
                             nargs='?', const=True, default=False)
+        parser.add_argument('--use_cf_attn',  type=str_to_bool, 
+                            nargs='?', const=True, default=False)
         parser.add_argument('--controlnet_conditioning_scale_cond', default=1.0, type=float)
         parser.add_argument('--controlnet_conditioning_scale_ref', default=1.0, type=float)
 

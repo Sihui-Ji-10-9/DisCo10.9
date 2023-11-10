@@ -18,13 +18,13 @@ import torch
 import torch.nn as nn
 import torch.utils.checkpoint
 
-from diffusers.configuration_utils import ConfigMixin, register_to_config
-from diffusers.loaders import UNet2DConditionLoadersMixin
-from diffusers.utils import BaseOutput, logging
-from diffusers.models.cross_attention import AttnProcessor
-from diffusers.models.embeddings import GaussianFourierProjection, TimestepEmbedding, Timesteps
-from diffusers.models.modeling_utils import ModelMixin
-from diffusers.models.unet_2d_blocks import (
+from ..configuration_utils import ConfigMixin, register_to_config
+from ..loaders import UNet2DConditionLoadersMixin
+from ..utils import BaseOutput, logging
+from .cross_attention import AttnProcessor
+from .embeddings import GaussianFourierProjection, TimestepEmbedding, Timesteps
+from .modeling_utils import ModelMixin
+from .unet_2d_blocks import (
     CrossAttnDownBlock2D,
     CrossAttnUpBlock2D,
     DownBlock2D,
@@ -394,7 +394,7 @@ class UNet2DConditionModel(ModelMixin, ConfigMixin, UNet2DConditionLoadersMixin)
 
         """
         count = len(self.attn_processors.keys())
-        print('-----in!')
+
         if isinstance(processor, dict) and len(processor) != count:
             raise ValueError(
                 f"A dict of processors was passed, but the number of processors {len(processor)} does not match the"
@@ -409,11 +409,9 @@ class UNet2DConditionModel(ModelMixin, ConfigMixin, UNet2DConditionLoadersMixin)
                     module.set_processor(processor.pop(f"{name}.processor"))
 
             for sub_name, child in module.named_children():
-                print('==',sub_name)
                 fn_recursive_attn_processor(f"{name}.{sub_name}", child, processor)
 
         for name, module in self.named_children():
-            print('==',name)
             fn_recursive_attn_processor(name, module, processor)
 
     def set_attention_slice(self, slice_size):
@@ -599,7 +597,7 @@ class UNet2DConditionModel(ModelMixin, ConfigMixin, UNet2DConditionLoadersMixin)
             for down_block_res_sample, down_block_additional_residual in zip(
                 down_block_res_samples, down_block_additional_residuals
             ):
-                down_block_res_sample = down_block_res_sample + down_block_additional_residual
+                down_block_res_sample += down_block_additional_residual
                 new_down_block_res_samples += (down_block_res_sample,)
 
             down_block_res_samples = new_down_block_res_samples
@@ -615,7 +613,7 @@ class UNet2DConditionModel(ModelMixin, ConfigMixin, UNet2DConditionLoadersMixin)
             )
 
         if mid_block_additional_residual is not None:
-            sample = sample + mid_block_additional_residual
+            sample += mid_block_additional_residual
 
         # 5. up
         for i, upsample_block in enumerate(self.up_blocks):

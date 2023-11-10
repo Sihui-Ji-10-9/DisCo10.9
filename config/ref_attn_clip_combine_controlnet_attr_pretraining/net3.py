@@ -903,7 +903,7 @@ class Net(nn.Module):
         gen_width = w
         generator = inputs['generator']
 
-        latents = self.prepare_latents(
+        latents0 = self.prepare_latents(
             b * self.args.num_inf_images_per_prompt,
             num_channels_latents,
             gen_height,
@@ -911,7 +911,7 @@ class Net(nn.Module):
             generator,
             latents=None,
         )
-        latents0 = self.prepare_latents_fix(
+        latents = self.prepare_latents_fix(
             b * self.args.num_inf_images_per_prompt,
             num_channels_latents,
             gen_height,

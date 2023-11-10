@@ -1,6 +1,6 @@
 import torch
 from utils.dist import synchronize, get_rank
-
+from .crossattn import CrossFrameAttnProcessor
 from config import *
 from typing import Callable, List, Optional, Union
 
@@ -30,6 +30,8 @@ from utils.common import ensure_directory
 from utils.dist import synchronize
 from dinov2.dinov_2 import get_dinov2_model
 
+from einops import rearrange
+import imageio
 class Net(nn.Module):
     def __init__(
         self, args
@@ -142,7 +144,10 @@ class Net(nn.Module):
             # print('[:, 3:]',unet.conv_in.weight[:, 3:].shape)
             # torch.Size([320, 4, 3, 3])
             unet.conv_in.weight[:, 4:] = torch.zeros(unet.conv_in.weight[:, 4:].shape) # new weights initialized to zero
-        
+        self.text2video_attn_proc = CrossFrameAttnProcessor(unet_chunk_size=2)
+        if self.args.use_cf_attn:
+            print('yes')
+            unet.set_attn_processor(processor=self.text2video_attn_proc)
         if self.args.enable_xformers_memory_efficient_attention:
             if is_xformers_available():
                 unet.enable_xformers_memory_efficient_attention()
@@ -750,10 +755,18 @@ class Net(nn.Module):
         # print('!!!',ref_image.shape)
         # print('===',img_key)
         # ['00008_00.jpg', '00035_00.jpg', '00067_00.jpg']
-        densepose = inputs['densepose']
+        densepose = inputs['densepose'].squeeze()
+        # print('!',densepose.shape) torch.Size([1, 20, 1024, 768])
+        # print('!!',ref_image.shape) torch.Size([1, 3, 256, 192])
+
         # torch.Size([2, 1024, 768])
+
         # print('1---',ref_image.shape)
-        # print('2---',densepose.shape)
+        # torch.Size([10, 3, 512, 384])
+        # print('2---',len(denseposes))
+        # 10
+        # print('3---',denseposes[0].shape)
+        # torch.Size([10, 2, 1024, 768])
         # 1--- torch.Size([3, 3, 224, 224])
         # 2--- torch.Size([3, 2, 1024, 768])
         # print('!!!',ref_image.shape) torch.Size([10, 3, 224, 224])         
@@ -777,7 +790,12 @@ class Net(nn.Module):
             refer_latents = self.clip_encode_image_local(ref_image, self.args.num_inf_images_per_prompt, do_classifier_free_guidance)
         else:
             refer_latents = self.clip_encode_image_global(ref_image, self.args.num_inf_images_per_prompt, do_classifier_free_guidance)
-     
+        # refer_latents = refer_latents.repeat(10,1,1)
+        refer_latents = torch.cat([repeat(refer_latents[0, :, :], "c k -> f c k", f=10),
+                                   repeat(refer_latents[1, :, :], "c k -> f c k", f=10)])
+        print('refer_latents',refer_latents.shape)
+        # print('refer_latents',refer_latents.shape)
+        # torch.Size([20, 235, 768])
         if self.args.ref_null_caption: # test must use null caption
             text = inputs['input_text']
             text = ["" for i in text]
@@ -870,7 +888,11 @@ class Net(nn.Module):
             generator,
             latents=None,
         )
-       
+        print('latents',latents.shape)
+        # torch.Size([1, 4, 32, 24])
+        latents = latents.repeat(10,1,1,1)
+        print('latents',latents.shape)
+        # torch.Size([10, 4, 32, 24])
         # Prepare extra step kwargs.
         extra_step_kwargs = self.prepare_extra_step_kwargs(generator)
 
@@ -881,24 +903,29 @@ class Net(nn.Module):
                 # expand the latents if we are doing classifier free guidance
                 latent_model_input = torch.cat([latents] * 2) if do_classifier_free_guidance else latents
                 latent_model_input = self.noise_scheduler.scale_model_input(latent_model_input, t)
+                # print('latent_model_input',latent_model_input.shape) 
+                # torch.Size([20, 4, 32, 24])
 
                 # Add pose to noisy latents
                 _, _, h, w = latent_model_input.shape
+                # densepose torch.Size([10, 2, 1024, 768])
+                # print('densepose',densepose.shape)
                 if do_classifier_free_guidance:
-                    # print('densepose.shape',densepose.shape)
+                    # print('---',torch.zeros(densepose.shape).shape)
                     # torch.Size([10, 2, 1024, 768])
-                    pose_input = torch.cat([torch.zeros(densepose.shape).cuda(), densepose]) 
+                    pose_input = torch.cat([torch.zeros(densepose.shape).cuda(), densepose])
+                    # print('pose_input',pose_input.shape)
+                    # torch.Size([20, 2, 1024, 768]) 
+                    # from IPython import embed; embed()
                 else:
-                    pose_input = torch.cat([densepose, densepose]) 
+                    pose_input = torch.cat([densepose, densepose])
+                # from IPython import embed; embed()
                 pose_input= F.interpolate(pose_input, (h,w)).cuda().to(dtype=self.dtype)
-                # print('pose_input',pose_input.shape) torch.Size([6, 2, 32, 32])
-                # torch.Size([20, 3, 32, 32])
-                # print('latent_model_input',latent_model_input.shape) torch.Size([6, 4, 32, 32])
-                # latent_model_input torch.Size([20, 4, 32, 32])
-                # print('latent_model_input',latent_model_input.cuda().dtype,latent_model_input.cuda().device)
-                # print('pose_input',pose_input.dtype,pose_input.device)
+                # print('pose_input',pose_input.shape) 
+                # torch.Size([20, 2, 32, 24])
                 latent_model_input = torch.cat((latent_model_input.cuda(), pose_input), 1)
-                # latent_model_input = self.conv_layer(latent_model_input)
+                # print('latent_model_input',latent_model_input.shape)
+                # torch.Size([20, 6, 32, 24])
                 '''
                 # controlnet(s) inference
                 if self.args.ref_null_caption: # null caption input for ref controlnet path
@@ -934,14 +961,19 @@ class Net(nn.Module):
 
                 # compute the previous noisy sample x_t -> x_t-1
                 latents = self.noise_scheduler.step(noise_pred, t, latents, **extra_step_kwargs).prev_sample
-
+                # print('==after',latents.shape)
+                # torch.Size([10, 4, 32, 24])
                 if i == len(timesteps) - 1 or (
                         (i + 1) > num_warmup_steps and (i + 1) % self.noise_scheduler.order == 0):
                     progress_bar.update()
 
         # Post-processing
+        print('===',latents.shape)
+        # torch.Size([10, 4, 32, 24])
         gen_img = self.image_decoder(latents)
-
+        gen_img = gen_img.detach().cpu()
+        print('gen_img',gen_img.shape)
+        # torch.Size([10, 3, 256, 192])
         outputs['logits_imgs'] = gen_img
         return outputs
 
@@ -1007,15 +1039,46 @@ def inner_collect_fn(args, inputs, outputs, log_dir, global_step, eval_save_file
         data2file(setting_output, os.path.join(eval_log_dir, 'Model_Setting.json'))
 
     dl = {**inputs, **{k: v for k, v in outputs.items() if k.split('_')[0] == 'logits'}}
+    # print(dl['logits_imgs'].shape)
+    # torch.Size([10, 3, 256, 192])
+    # print(dl.keys())
+    # dict_keys(['img_key', 'label_imgs', 'densepose', 'reference_img', 'reference_img_controlnet', 'reference_img_vae', 'background_mask', 'logits_imgs'])
     ## WT DEBUG
     # print('just for debug')
     # if 'cond_img_pose' in dl:
     #     del dl['cond_img_pose']
     #     del dl['cond_img_attr']
     ld = dl2ld(dl)
-
+    
     l = ld[0]['logits_imgs'].shape[0]
+    # print(ld[0].keys())
+    # dict_keys(['img_key', 'label_imgs', 'densepose', 'reference_img', 'reference_img_controlnet', 'reference_img_vae', 'background_mask', 'logits_imgs'])
+    # print(ld[0]['logits_imgs'].shape)
+    # torch.Size([3, 256, 192])
+    # print('outputslogits_imgs',outputs['logits_imgs'].shape)
+    # outputslogits_imgs torch.Size([10, 3, 256, 192])
+    frames = outputs['logits_imgs']
+    # frames = rearrange(frames, "f c h w -> f h w c")
+    
+    save_vd_dir = "/home/nfs/jsh/DisCo"
+    save_vd_path = os.path.join(save_vd_dir, 'movie.mp4')
+    # vd_outputs = []
+    for i, x in enumerate(frames):
+        # print('xxxx',x.shape)
+        # torch.Size([256, 192, 3])
+        x = tensor2pil(x)[0]
+        # x = torchvision.utils.make_grid(torch.Tensor(x), nrow=4)
+        # x = (x * 255).numpy().astype(np.uint8)
+        x.save(os.path.join(save_vd_dir, f'0{i}.png'))
+        # vd_outputs.append(x)
+        # imageio.imsave(os.path.join(dir, os.path.splitext(name)[0] + f'_{i}.jpg'), x)
 
+    # imageio.mimsave(save_vd_path, vd_outputs, fps=4)
+
+    # image = tensor2pil(sample['logits_imgs'])[0]
+    # print('!!!',os.path.join(pred_save_path, prefix + postfix + '.png'))
+    # image.save(os.path.join(pred_save_path, prefix + postfix + '.png'))
+    '''
     for _, sample in enumerate(ld):
         _name = 'nuwa'
         if 'input_text' in sample:
@@ -1039,8 +1102,11 @@ def inner_collect_fn(args, inputs, outputs, log_dir, global_step, eval_save_file
             except Exception as e:
                 print(f'some errors happened in saving label_imgs: {e}')
         if 'logits_imgs' in sample:
+            # print('samplelogits_imgs',sample['logits_imgs'].shape)
+            # torch.Size([3, 256, 192])
             image = tensor2pil(sample['logits_imgs'])[0]
             try:
+                print('!!!',os.path.join(pred_save_path, prefix + postfix + '.png'))
                 image.save(os.path.join(pred_save_path, prefix + postfix + '.png'))
             except Exception as e:
                 print(f'some errors happened in saving logits_imgs: {e}')
@@ -1066,6 +1132,7 @@ def inner_collect_fn(args, inputs, outputs, log_dir, global_step, eval_save_file
                 image.save(os.path.join(ref_control_save_path, prefix + postfix + '.png'))
             except Exception as e:
                 print(f'some errors happened in saving label_imgs: {e}')
+    '''
     return gt_save_path, pred_save_path
 
 def tensor2pil(images):

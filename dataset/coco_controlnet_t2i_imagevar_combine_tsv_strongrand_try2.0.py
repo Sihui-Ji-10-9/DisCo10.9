@@ -172,15 +172,23 @@ class BaseDataset(TsvCondImgCompositeDataset):
     def get_dp(self, img_key):
         # print('self.dp_file',self.dp_file)
         # /HOME/HOME/jisihui/VITON-hd-resized/try/densepose
-        dp_path=self.dp_file+'/'+img_key+'.npy'
-        if not os.path.exists(dp_path):
-            print('error!!')
-        # print(dp_path)
-        dp = F.interpolate(torch.from_numpy(np.load(dp_path).astype('float32')).unsqueeze(0), (self.height_base, self.width_base), mode='bilinear').squeeze(0)
-        dp = self.tensor_transforms(dp)
-        # print('before==',dp.shape)
-        # torch.Size([2, 1024, 768])
-        return dp
+        # dp_path=self.dp_file+'/'+img_key+'.npy'
+        dp_name_list = os.listdir(self.dp_file)
+        dp_paths = [ self.dp_file + '/' + dp_name for dp_name in dp_name_list]
+        dp_list=[]
+        for dp_path in dp_paths:
+            if not os.path.exists(dp_path):
+                print('error!!')
+            # print(dp_path)
+            dp = F.interpolate(torch.from_numpy(np.load(dp_path).astype('float32')).unsqueeze(0), (self.height_base, self.width_base), mode='bilinear').squeeze(0)
+            dp = self.tensor_transforms(dp)
+            dp_list.append(dp.unsqueeze(0))
+            # print('before==',dp.shape)
+            # torch.Size([2, 1024, 768])
+        dp_list = torch.cat(dp_list)
+        # print('dp_list',dp_list.shape)
+        # torch.Size([20, 1024, 768])
+        return dp_list
     def get_shape(self, img_idx):
         try:
             # print(img_idx)
@@ -298,5 +306,6 @@ class BaseDataset(TsvCondImgCompositeDataset):
             outputs.update({'cond_imgs': skeleton_img})
         if self.args.add_shape:
             outputs.update({'shape': shape})
-        
+        # print('==densepose',densepose.shape)
+        # torch.Size([20, 1024, 768])
         return outputs
