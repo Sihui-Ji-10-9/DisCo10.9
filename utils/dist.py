@@ -81,7 +81,7 @@ def dist_init(args, distributed=True):
             args.node_id = 0
             os.environ['LOCAL_RANK'] = str(args.local_rank)
             master_addr = os.environ.get("MASTER_ADDR", 'localhost')
-            master_port = os.environ.get("MASTER_PORT", 12309)
+            master_port = os.environ.get("MASTER_PORT", 12312)
             master_uri = f"tcp://{master_addr}:{master_port}" #if master_addr else 'localhost'
             LOGGER.info(
                 f"Init distributed training on "

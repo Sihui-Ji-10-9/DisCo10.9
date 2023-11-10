@@ -175,6 +175,7 @@ class BaseDataset(TsvCondImgCompositeDataset):
         # dp_path=self.dp_file+'/'+img_key+'.npy'
         dp_name_list = os.listdir(self.dp_file)
         dp_paths = [ self.dp_file + '/' + dp_name for dp_name in dp_name_list]
+        dp_paths.sort()
         dp_list=[]
         for dp_path in dp_paths:
             if not os.path.exists(dp_path):

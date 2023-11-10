@@ -145,14 +145,15 @@ class Net(nn.Module):
             # torch.Size([320, 4, 3, 3])
             unet.conv_in.weight[:, 4:] = torch.zeros(unet.conv_in.weight[:, 4:].shape) # new weights initialized to zero
         self.text2video_attn_proc = CrossFrameAttnProcessor(unet_chunk_size=2)
-        if self.args.use_cf_attn:
-            print('yes')
-            unet.set_attn_processor(processor=self.text2video_attn_proc)
+        
         if self.args.enable_xformers_memory_efficient_attention:
             if is_xformers_available():
                 unet.enable_xformers_memory_efficient_attention()
             else:
                 print("xformers is not available, therefore not enabled")
+        if self.args.use_cf_attn:
+            # print('yes') yes
+            unet.set_attn_processor(processor=self.text2video_attn_proc)
 
 
         # WT: initialize controlnet from the pretrained image variation SD model
@@ -1006,6 +1007,7 @@ class Net(nn.Module):
 
 
 def inner_collect_fn(args, inputs, outputs, log_dir, global_step, eval_save_filename='eval_visu'):
+    
     rank = get_rank()
     if rank == -1:
         splice = ''
@@ -1060,8 +1062,8 @@ def inner_collect_fn(args, inputs, outputs, log_dir, global_step, eval_save_file
     frames = outputs['logits_imgs']
     # frames = rearrange(frames, "f c h w -> f h w c")
     
-    save_vd_dir = "/home/nfs/jsh/DisCo"
-    save_vd_path = os.path.join(save_vd_dir, 'movie.mp4')
+    # save_vd_dir = "/home/nfs/jsh/DisCo"
+    # save_vd_path = os.path.join(eval_save_filename, 'movie.mp4')
     # vd_outputs = []
     for i, x in enumerate(frames):
         # print('xxxx',x.shape)
@@ -1069,7 +1071,9 @@ def inner_collect_fn(args, inputs, outputs, log_dir, global_step, eval_save_file
         x = tensor2pil(x)[0]
         # x = torchvision.utils.make_grid(torch.Tensor(x), nrow=4)
         # x = (x * 255).numpy().astype(np.uint8)
-        x.save(os.path.join(save_vd_dir, f'0{i}.png'))
+        save_dir = os.path.join(eval_save_filename, 'pred_image')
+        os.makedirs(save_dir, exist_ok=True)
+        x.save(os.path.join(save_dir, f'0{i}.png'))
         # vd_outputs.append(x)
         # imageio.imsave(os.path.join(dir, os.path.splitext(name)[0] + f'_{i}.jpg'), x)
 

@@ -19,7 +19,7 @@ import decord
 class CrossFrameAttnProcessor:
     def __init__(self, unet_chunk_size=2):
         self.unet_chunk_size = unet_chunk_size
-        print('-----~!!')
+        # print('-----~!!') yes
     def __call__(
             self,
             attn,
@@ -37,7 +37,7 @@ class CrossFrameAttnProcessor:
             encoder_hidden_states = attn.norm_cross(encoder_hidden_states)
         key = attn.to_k(encoder_hidden_states)
         value = attn.to_v(encoder_hidden_states)
-        print('-----!!')
+        # print('-----!!')
         # Sparse Attention
         if not is_cross_attention:
             video_length = key.size()[0] // self.unet_chunk_size

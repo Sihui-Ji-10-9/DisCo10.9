@@ -2,7 +2,7 @@ import os
 import imageio
 
 # 文件夹路径
-folder_path = '/home/nfs/jsh/DisCo/eval/eval_pt3.0_1_dino_hd_try2.0_fix_fat/pred_gs7.5_scale-cond1.0-ref1.0'  # 替换为实际的文件夹路径
+folder_path = '/home/nfs/jsh/DisCo/eval/eval_pt3.0_1_dino_hd_try2.0_fix_fat_vedio3/pred_image'  # 替换为实际的文件夹路径
 
 # 读取文件夹中的图片
 image_files = sorted([os.path.join(folder_path, file) for file in os.listdir(folder_path) if file.endswith('.png')])
@@ -15,7 +15,7 @@ for i in range(len(image_files)):
     images.append(imageio.imread(image_file))
 
 # 设置 GIF 参数
-gif_path = '/home/nfs/jsh/DisCo/eval/eval_pt3.0_1_dino_hd_try2.0_fix_fat/pred_gs7.5_scale-cond1.0-ref1.0/output.gif'  # 替换为实际的输出路径
+gif_path = '/home/nfs/jsh/DisCo/eval/eval_pt3.0_1_dino_hd_try2.0_fix_fat_vedio3/pred_image/output.gif'  # 替换为实际的输出路径
 gif_duration = 0.5  # 每张图片的显示时间（秒）
 
 # 保存为 GIF 视频

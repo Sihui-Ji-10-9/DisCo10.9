@@ -14,7 +14,7 @@ class Args(BasicArgs):
     # max_eval_samples = 2
     max_video_len = 1  # L=16
     debug_max_video_len = 1
-    img_full_size = (256, 192)
+    img_full_size = (512, 384)
     img_size = (256, 256)
     fps = 5
     data_dir = "./blob_dir/debug_output/video_sythesis/dataset"
