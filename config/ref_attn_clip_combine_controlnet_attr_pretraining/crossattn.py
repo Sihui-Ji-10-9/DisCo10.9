@@ -26,6 +26,9 @@ class CrossFrameAttnProcessor:
             hidden_states,
             encoder_hidden_states=None,
             attention_mask=None):
+        # None
+        # print('attn',attn)
+        # attn CrossAttention(
         batch_size, sequence_length, _ = hidden_states.shape
         attention_mask = attn.prepare_attention_mask(attention_mask, sequence_length, batch_size)
         query = attn.to_q(hidden_states)
@@ -37,10 +40,20 @@ class CrossFrameAttnProcessor:
             encoder_hidden_states = attn.norm_cross(encoder_hidden_states)
         key = attn.to_k(encoder_hidden_states)
         value = attn.to_v(encoder_hidden_states)
+        # encoder_hidden_states torch.Size([20, 3072, 320])
+        # print('k',key.shape)
+        # k torch.Size([20, 3072, 320])
+        # print('q',query.shape)
+        # print('v',value.shape)
+        # same
         # print('-----!!')
         # Sparse Attention
         if not is_cross_attention:
+            # print('--',key.size()[0],self.unet_chunk_size)
+            # -- 20 2
             video_length = key.size()[0] // self.unet_chunk_size
+            # print('video_length',video_length)
+            # video_length 10
             # former_frame_index = torch.arange(video_length) - 1
             # former_frame_index[0] = 0
             former_frame_index = [0] * video_length
@@ -52,13 +65,16 @@ class CrossFrameAttnProcessor:
             value = rearrange(value, "b f d c -> (b f) d c")
 
         query = attn.head_to_batch_dim(query)
+        # torch.Size([160, 3072, 40])
         key = attn.head_to_batch_dim(key)
         value = attn.head_to_batch_dim(value)
 
         attention_probs = attn.get_attention_scores(query, key, attention_mask)
+        # attention_probs torch.Size([160, 3072, 3072])
         hidden_states = torch.bmm(attention_probs, value)
         hidden_states = attn.batch_to_head_dim(hidden_states)
-
+        # hidden_states torch.Size([20, 3072, 320])
+        # from IPython import embed; embed()
         # linear proj
         hidden_states = attn.to_out[0](hidden_states)
         # dropout

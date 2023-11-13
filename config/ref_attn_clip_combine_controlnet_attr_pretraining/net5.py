@@ -795,8 +795,8 @@ class Net(nn.Module):
         refer_latents = torch.cat([repeat(refer_latents[0, :, :], "c k -> f c k", f=10),
                                    repeat(refer_latents[1, :, :], "c k -> f c k", f=10)])
         print('refer_latents',refer_latents.shape)
-        # print('refer_latents',refer_latents.shape)
         # torch.Size([20, 235, 768])
+        # torch.Size([20, 973, 768])
         if self.args.ref_null_caption: # test must use null caption
             text = inputs['input_text']
             text = ["" for i in text]
@@ -891,9 +891,11 @@ class Net(nn.Module):
         )
         print('latents',latents.shape)
         # torch.Size([1, 4, 32, 24])
+        # torch.Size([1, 4, 64, 48])
         latents = latents.repeat(10,1,1,1)
         print('latents',latents.shape)
         # torch.Size([10, 4, 32, 24])
+        # torch.Size([10, 4, 64, 48])
         # Prepare extra step kwargs.
         extra_step_kwargs = self.prepare_extra_step_kwargs(generator)
 

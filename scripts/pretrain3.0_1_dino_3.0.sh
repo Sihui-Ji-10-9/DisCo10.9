@@ -2,7 +2,7 @@ TORCH_DISTRIBUTED_DEBUG=DETAIL PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION=python AZF
 --cf config/ref_attn_clip_combine_controlnet_attr_pretraining/coco_S256_xformers_tsv_strongrand5.py \
 --do_train --root_dir /home/nfs/jsh/DisCo \
 --local_train_batch_size 32 --local_eval_batch_size 32 --log_dir exp/pretrain_3.0_1_dino_hd \
---epochs 400 --deepspeed --eval_step 500 --save_step 500 --gradient_accumulate_steps 1 \
+--epochs 600 --deepspeed --eval_step 500 --save_step 500 --gradient_accumulate_steps 1 \
 --learning_rate 1e-3 --fix_dist_seed --loss_target "noise" \
 --train_yaml /HOME/HOME/jisihui/VITON-hd-resized/train/tsv/train.yaml \
 --val_yaml /HOME/HOME/jisihui/VITON-hd-resized/try/tsv/val.yaml \
