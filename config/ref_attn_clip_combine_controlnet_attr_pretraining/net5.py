@@ -1,6 +1,6 @@
 import torch
 from utils.dist import synchronize, get_rank
-from .crossattn import CrossFrameAttnProcessor
+from .crossframeattn_base import CrossFrameAttnProcessor
 from config import *
 from typing import Callable, List, Optional, Union
 
@@ -756,7 +756,7 @@ class Net(nn.Module):
         # print('!!!',ref_image.shape)
         # print('===',img_key)
         # ['00008_00.jpg', '00035_00.jpg', '00067_00.jpg']
-        densepose = inputs['densepose'].squeeze()
+        densepose = inputs['densepose']
         # print('!',densepose.shape) torch.Size([1, 20, 1024, 768])
         # print('!!',ref_image.shape) torch.Size([1, 3, 256, 192])
 
@@ -892,10 +892,10 @@ class Net(nn.Module):
         print('latents',latents.shape)
         # torch.Size([1, 4, 32, 24])
         # torch.Size([1, 4, 64, 48])
-        latents = latents.repeat(10,1,1,1)
+        latents = latents.repeat(1,10,1,1,1)
         print('latents',latents.shape)
         # torch.Size([10, 4, 32, 24])
-        # torch.Size([10, 4, 64, 48])
+        # torch.Size([1,10, 4, 64, 48])
         # Prepare extra step kwargs.
         extra_step_kwargs = self.prepare_extra_step_kwargs(generator)
 
@@ -906,29 +906,38 @@ class Net(nn.Module):
                 # expand the latents if we are doing classifier free guidance
                 latent_model_input = torch.cat([latents] * 2) if do_classifier_free_guidance else latents
                 latent_model_input = self.noise_scheduler.scale_model_input(latent_model_input, t)
-                # print('latent_model_input',latent_model_input.shape) 
+                print('latent_model_input',latent_model_input.shape) 
                 # torch.Size([20, 4, 32, 24])
-
+                # torch.Size([20, 4, 64, 48])
+                # torch.Size([2, 10, 4, 64, 48]) 
                 # Add pose to noisy latents
-                _, _, h, w = latent_model_input.shape
+                _, _, _, h, w = latent_model_input.shape
                 # densepose torch.Size([10, 2, 1024, 768])
                 # print('densepose',densepose.shape)
+                # torch.Size([1, 10, 2, 1024, 768])
                 if do_classifier_free_guidance:
-                    # print('---',torch.zeros(densepose.shape).shape)
-                    # torch.Size([10, 2, 1024, 768])
+                    print('---',torch.zeros(densepose.shape).shape)
+                    # --- torch.Size([1, 10, 2, 1024, 768])
                     pose_input = torch.cat([torch.zeros(densepose.shape).cuda(), densepose])
                     # print('pose_input',pose_input.shape)
                     # torch.Size([20, 2, 1024, 768]) 
+                    # torch.Size([2, 10, 2, 1024, 768])
                     # from IPython import embed; embed()
                 else:
                     pose_input = torch.cat([densepose, densepose])
                 # from IPython import embed; embed()
+                bb = pose_input.shape[0]
+                pose_input = rearrange(pose_input, 'b m c h w -> (b m) c h w')
                 pose_input= F.interpolate(pose_input, (h,w)).cuda().to(dtype=self.dtype)
-                # print('pose_input',pose_input.shape) 
+                pose_input = rearrange(pose_input, '(b m) c h w -> b m c h w', b=bb)
+                print('pose_input',pose_input.shape) 
                 # torch.Size([20, 2, 32, 24])
-                latent_model_input = torch.cat((latent_model_input.cuda(), pose_input), 1)
-                # print('latent_model_input',latent_model_input.shape)
+                # torch.Size([2, 10, 2, 64, 48])
+                latent_model_input = torch.cat((latent_model_input.cuda(), pose_input), 2)
+                print('latent_model_input',latent_model_input.shape)
                 # torch.Size([20, 6, 32, 24])
+                # torch.Size([20, 6, 64, 48])  
+                # torch.Size([2, 10, 6, 64, 48])
                 '''
                 # controlnet(s) inference
                 if self.args.ref_null_caption: # null caption input for ref controlnet path
@@ -973,6 +982,8 @@ class Net(nn.Module):
         # Post-processing
         print('===',latents.shape)
         # torch.Size([10, 4, 32, 24])
+        # === torch.Size([1, 10, 4, 64, 48])
+        latents = rearrange(latents, 'b m c h w -> (b m) c h w')
         gen_img = self.image_decoder(latents)
         gen_img = gen_img.detach().cpu()
         print('gen_img',gen_img.shape)

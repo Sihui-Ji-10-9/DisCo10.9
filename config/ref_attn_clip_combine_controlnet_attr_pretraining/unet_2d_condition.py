@@ -35,7 +35,7 @@ from diffusers.models.unet_2d_blocks import (
     get_up_block,
 )
 
-
+from einops import rearrange
 logger = logging.get_logger(__name__)  # pylint: disable=invalid-name
 
 
@@ -492,6 +492,7 @@ class UNet2DConditionModel(ModelMixin, ConfigMixin, UNet2DConditionLoadersMixin)
         sample: torch.FloatTensor,
         timestep: Union[torch.Tensor, float, int],
         encoder_hidden_states: torch.Tensor,
+        meta:Optional[Dict[str, Any]] = None,
         class_labels: Optional[torch.Tensor] = None,
         timestep_cond: Optional[torch.Tensor] = None,
         attention_mask: Optional[torch.Tensor] = None,
@@ -517,6 +518,9 @@ class UNet2DConditionModel(ModelMixin, ConfigMixin, UNet2DConditionLoadersMixin)
             [`~models.unet_2d_condition.UNet2DConditionOutput`] if `return_dict` is True, otherwise a `tuple`. When
             returning a tuple, the first element is the sample tensor.
         """
+        _, m, _, h_lr, w_lr = sample.shape
+        sample = rearrange(sample, 'b m c h w -> (b m) c h w')
+
         # By default samples have to be AT least a multiple of the overall upsampling factor.
         # The overall upsampling factor is equal to 2 ** (# num of upsampling layears).
         # However, the upsampling interpolation output size can be forced to fit any upsampling size
@@ -535,10 +539,24 @@ class UNet2DConditionModel(ModelMixin, ConfigMixin, UNet2DConditionLoadersMixin)
         if attention_mask is not None:
             attention_mask = (1 - attention_mask.to(sample.dtype)) * -10000.0
             attention_mask = attention_mask.unsqueeze(1)
-
+        
         # 0. center input if necessary
         if self.config.center_input_sample:
             sample = 2 * sample - 1.0
+
+        # plus
+        # compute correspondence
+        # self.get_correspondence(meta)
+        
+        # print('sample.shape',sample.shape)
+        # torch.Size([2, 10, 6, 64, 48])
+        reso_lr = h_lr*8, w_lr*8
+        cp_mask=torch.ones(m, m, device=sample.device)
+        for i in range(m):
+            cp_mask[i, i]=0
+
+        # hidden_states = rearrange(hidden_states, 'b m c h w -> (b m) c h w')
+        # prompt_embd = rearrange(prompt_embd, 'b m l c -> (b m) l c')
 
         # 1. time
         timesteps = timestep
@@ -578,7 +596,8 @@ class UNet2DConditionModel(ModelMixin, ConfigMixin, UNet2DConditionLoadersMixin)
 
         # 2. pre-process
         sample = self.conv_in(sample)
-
+        # print('==1sample',sample.shape)
+        # torch.Size([20, 320, 64, 48])      
         # 3. down
         down_block_res_samples = (sample,)
         for downsample_block in self.down_blocks:
@@ -589,8 +608,13 @@ class UNet2DConditionModel(ModelMixin, ConfigMixin, UNet2DConditionLoadersMixin)
                     encoder_hidden_states=encoder_hidden_states,
                     attention_mask=attention_mask,
                     cross_attention_kwargs=cross_attention_kwargs,
+                    meta=meta,
+                    reso=reso_lr,
+                    m = m,
                 )
             else:
+                # print('==2sample',sample.shape)
+                # torch.Size([20, 1280, 8, 6])
                 sample, res_samples = downsample_block(hidden_states=sample, temb=emb)
 
             down_block_res_samples += res_samples
@@ -614,6 +638,9 @@ class UNet2DConditionModel(ModelMixin, ConfigMixin, UNet2DConditionLoadersMixin)
                 encoder_hidden_states=encoder_hidden_states,
                 attention_mask=attention_mask,
                 cross_attention_kwargs=cross_attention_kwargs,
+                meta=meta,
+                reso=reso_lr,
+                m = m,
             )
 
         if mid_block_additional_residual is not None:
@@ -640,10 +667,13 @@ class UNet2DConditionModel(ModelMixin, ConfigMixin, UNet2DConditionLoadersMixin)
                     cross_attention_kwargs=cross_attention_kwargs,
                     upsample_size=upsample_size,
                     attention_mask=attention_mask,
+                    meta=meta,
+                    reso=reso_lr,
+                    m = m,
                 )
             else:
                 sample = upsample_block(
-                    hidden_states=sample, temb=emb, res_hidden_states_tuple=res_samples, upsample_size=upsample_size
+                    hidden_states=sample, temb=emb, res_hidden_states_tuple=res_samples, upsample_size=upsample_size,
                 )
 
         # 6. post-process

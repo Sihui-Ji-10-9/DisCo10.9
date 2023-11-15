@@ -25,11 +25,18 @@ class CrossFrameAttnProcessor:
             attn,
             hidden_states,
             encoder_hidden_states=None,
-            attention_mask=None):
+            attention_mask=None,
+            meta=None,
+        ):
         # None
         # print('attn',attn)
         # attn CrossAttention(
+        # _, c, h, w = hidden_states.shape
+        # x = rearrange(x, '(b m) c h w -> b m c h w', m=m)
+        
         batch_size, sequence_length, _ = hidden_states.shape
+        # print('hidden_states.shape',hidden_states.shape)
+        # torch.Size([20, 3072, 320])
         attention_mask = attn.prepare_attention_mask(attention_mask, sequence_length, batch_size)
         query = attn.to_q(hidden_states)
 
@@ -38,10 +45,11 @@ class CrossFrameAttnProcessor:
             encoder_hidden_states = hidden_states
         elif attn.cross_attention_norm:
             encoder_hidden_states = attn.norm_cross(encoder_hidden_states)
+        print('encoder_hidden_states',encoder_hidden_states.shape)
         key = attn.to_k(encoder_hidden_states)
         value = attn.to_v(encoder_hidden_states)
         # encoder_hidden_states torch.Size([20, 3072, 320])
-        # print('k',key.shape)
+        print('k',key.shape)
         # k torch.Size([20, 3072, 320])
         # print('q',query.shape)
         # print('v',value.shape)

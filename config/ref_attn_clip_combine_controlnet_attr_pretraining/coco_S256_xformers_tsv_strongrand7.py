@@ -1,14 +1,14 @@
 import torch
 
 from config import *
-from config.ref_attn_clip_combine_controlnet_attr_pretraining.net5_base import Net, inner_collect_fn
+from config.ref_attn_clip_combine_controlnet_attr_pretraining.net5 import Net, inner_collect_fn
 
 class Args(BasicArgs):
     task_name, method_name = BasicArgs.parse_config_name(__file__)
     log_dir = os.path.join(BasicArgs.root_dir, task_name, method_name)
 
     # data
-    dataset_cf = 'dataset/coco_controlnet_t2i_imagevar_combine_tsv_strongrand_try2.0_base.py'
+    dataset_cf = 'dataset/coco_controlnet_t2i_imagevar_combine_tsv_strongrand_try2.0.py'
     max_train_samples = None
     max_eval_samples = None
     # max_eval_samples = 2

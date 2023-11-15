@@ -183,18 +183,12 @@ class BaseDataset(TsvCondImgCompositeDataset):
             # print(dp_path)
             dp = F.interpolate(torch.from_numpy(np.load(dp_path).astype('float32')).unsqueeze(0), (self.height_base, self.width_base), mode='bilinear').squeeze(0)
             dp = self.tensor_transforms(dp)
-            # print('before==',dp.shape)
-            #  torch.Size([2, 1024, 768])
-            # print('before==',dp.unsqueeze(0).shape)
-            # before== torch.Size([1, 2, 1024, 768])
             dp_list.append(dp.unsqueeze(0))
-            
+            # print('before==',dp.shape)
             # torch.Size([2, 1024, 768])
-        dp_list = torch.cat(dp_list,dim=0)
-        
+        dp_list = torch.cat(dp_list)
         # print('dp_list',dp_list.shape)
         # torch.Size([20, 1024, 768])
-        # torch.Size([2,10, 1024, 768])
         return dp_list
     def get_shape(self, img_idx):
         try:
@@ -315,5 +309,4 @@ class BaseDataset(TsvCondImgCompositeDataset):
             outputs.update({'shape': shape})
         # print('==densepose',densepose.shape)
         # torch.Size([20, 1024, 768])
-        # torch.Size([10, 2, 1024, 768])
         return outputs
