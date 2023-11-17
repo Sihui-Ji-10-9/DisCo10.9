@@ -480,6 +480,7 @@ class TsvCompositeDataset(Dataset_Base):
         # if self.densepose:
         #     self.smpl_file = self.cfg.get('img_densepose', None)
         self.dp_file = self.cfg.get('densepose', None)
+        self.cor_file = self.cfg.get('correspondence', None)
         self.shape_file = self.cfg.get('shape', None)
         self.img_mask_file = self.cfg.get('img_mask', None)
 

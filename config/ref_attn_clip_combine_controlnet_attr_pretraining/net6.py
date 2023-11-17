@@ -682,7 +682,6 @@ class Net(nn.Module):
             noisy_latents,
             timesteps,
             encoder_hidden_states=refer_latents # refer latents
-
         ).sample
 
         if loss_target == "x0":

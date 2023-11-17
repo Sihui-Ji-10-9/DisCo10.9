@@ -757,6 +757,7 @@ class Net(nn.Module):
         # print('===',img_key)
         # ['00008_00.jpg', '00035_00.jpg', '00067_00.jpg']
         densepose = inputs['densepose']
+        correspondence = inputs['correspondence']
         # print('!',densepose.shape) torch.Size([1, 20, 1024, 768])
         # print('!!',ref_image.shape) torch.Size([1, 3, 256, 192])
 
@@ -913,10 +914,10 @@ class Net(nn.Module):
                 # Add pose to noisy latents
                 _, _, _, h, w = latent_model_input.shape
                 # densepose torch.Size([10, 2, 1024, 768])
-                # print('densepose',densepose.shape)
+                print('densepose',densepose.shape)
                 # torch.Size([1, 10, 2, 1024, 768])
                 if do_classifier_free_guidance:
-                    print('---',torch.zeros(densepose.shape).shape)
+                    # print('---',torch.zeros(densepose.shape).shape)
                     # --- torch.Size([1, 10, 2, 1024, 768])
                     pose_input = torch.cat([torch.zeros(densepose.shape).cuda(), densepose])
                     # print('pose_input',pose_input.shape)
@@ -964,7 +965,8 @@ class Net(nn.Module):
                 noise_pred = self.unet(
                     latent_model_input,
                     t,
-                    encoder_hidden_states=refer_latents).sample.to(dtype=self.dtype)
+                    encoder_hidden_states=refer_latents,
+                    meta=inputs).sample.to(dtype=self.dtype)
 
                 # perform guidance
                 if do_classifier_free_guidance:

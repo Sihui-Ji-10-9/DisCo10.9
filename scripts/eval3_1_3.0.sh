@@ -7,8 +7,8 @@ python finetune_sdm_yaml.py \
 --log_dir exp/eval --epochs 20 --deepspeed --eval_step 500 --save_step 500 \
 --gradient_accumulate_steps 1 \
 --learning_rate 2e-4 --fix_dist_seed --loss_target "noise" \
---train_yaml /HOME/HOME/jisieval_save_filenamehui/VITON-hd-resized/try2.0/tsv2/val.yaml \
---val_yaml /HOME/HOME/jisihui/VITON-hd-resized/try2.0/tsv2/val.yaml \
+--train_yaml /home/nfs/jsh/HOME/VITON-hd-resized/try2.0/tsv/val.yaml \
+--val_yaml /home/nfs/jsh/HOME/VITON-hd-resized/try2.0/tsv/val.yaml \
 --unet_unfreeze_type "all" \
 --ref_null_caption False \
 --combine_clip_local --combine_use_mask --viton_hd --no_smpl --use_cf_attn \
