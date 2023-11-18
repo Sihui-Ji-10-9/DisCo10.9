@@ -34,12 +34,13 @@ for i in range(len(file_paths_uv)):
     data_i = np.concatenate([data_uv_i,data_i_i],axis=0)
     print(data_i.shape)
     # c = np.empty_like(data_i[0], dtype=list)
-    c = np.ones((1024,768,2))*(-1)
+    c = np.ones((1024,768,2))*(-100000)
     for i in range(1024):
         for j in range(768):
             # item=np.where(data0[:]==data1[:,i,j])
-            if data0[0,i,j]!=0:
-                item=np.where((data_i[0]==data0[0,i,j])&(data_i[1]==data0[1,i,j])&(data_i[2]==data0[2,i,j]))
+            if data0[2,i,j]!=0:
+                item=np.where((np.abs(data_i[0]-data0[0,i,j])<0.01)&(np.abs(data_i[1]-data0[1,i,j])<0.01)&(data_i[2]==data0[2,i,j]))
+                # item=np.where((data_i[0]==data0[0,i,j])&(data_i[1]==data0[1,i,j])&(data_i[2]==data0[2,i,j]))
                 # print(item)
                 if item[0].size > 0:
                     # coordinates = list(zip(item[0], item[1]))
@@ -48,12 +49,14 @@ for i in range(len(file_paths_uv)):
                     c[i,j,0]=np.mean(item[0]).round()
                     c[i,j,1]=np.mean(item[1]).round()
                     # c[i,j]=[np.mean(item[0]).round(),np.mean(item[1]).round()]
-    save_path = path_uv_i.replace('densepose_fat', 'densepose_fat_cor')
+    save_path = path_uv_i.replace('densepose_fat', 'densepose_fat_cor_new2.0')
     np.save(save_path, c,allow_pickle=True)
     cor.append(c)
 cor = np.array(cor)
-np.save('/HOME/HOME/jisihui/VITON-hd-resized/try2.0/densepose_fat/cor.npy', cor,allow_pickle=True)
+np.save('/home/nfs/jsh/HOME/VITON-hd-resized/try2.0/cor2.0.npy', cor,allow_pickle=True)
 print(cor.shape)
+# 10 1024 768 2
+# 6-16个点
 
 # cc = np.load(save_path,allow_pickle=True)
 # # print(c)

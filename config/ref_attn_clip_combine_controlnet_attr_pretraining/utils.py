@@ -69,21 +69,21 @@ def get_key_value(key_value, xy_l, xy_r, depth_query, depths, ori_h, ori_w, ori_
     b, c, h, w = key_value.shape
     # torch.Size([1, 320, 64, 48])
     query_scale = ori_h//query_h
-    # 8
+    # 16
     print(query_scale)
     key_scale = ori_h_r//h
-    # 8
+    # 16
     print('xy_l',xy_l.shape)
-    # xy_l torch.Size([1, 1024, 768, 2])
+    # xy_l torch.Size([1,1024, 768, 2])
     xy_l = xy_l[:, query_scale//2::query_scale,query_scale//2::query_scale]/key_scale-0.5
     print('xy_l',xy_l.shape)
-    # xy_l torch.Size([1, 128, 96, 2])
+    # xy_l torch.Size([1, 64, 48, 2])
     print('key_value',key_value.shape)
     # key_value torch.Size([1, 320, 64, 48])
     print('depth_query',depth_query.shape)
-    # depth_query torch.Size([1, 512, 384])
+    # depth_query torch.Size([1, 1024, 768])
     print('depths',depths.shape)
-    # depths torch.Size([1, 512, 384])
+    # depths torch.Size([1,1024, 768])
 
     # torch.Size([1, 64, 48,2])
     key_values = []
@@ -99,7 +99,9 @@ def get_key_value(key_value, xy_l, xy_r, depth_query, depths, ori_h, ori_w, ori_
     for i in range(0-kernal_size//2, 1+kernal_size//2):
         for j in range(0-kernal_size//2, 1+kernal_size//2):
             xy_l_norm = xy_l.clone()
-            # [1, 128, 96, 2]
+            xy_l_norm[..., 0]=xy_l[..., 1]
+            xy_l_norm[..., 1]=xy_l[..., 0]
+            # [1, 64, 48, 2]
             # displacement
             xy_l_norm[..., 0] = xy_l_norm[..., 0] + i
             xy_l_norm[..., 1] = xy_l_norm[..., 1] + j
@@ -121,6 +123,7 @@ def get_key_value(key_value, xy_l, xy_r, depth_query, depths, ori_h, ori_w, ori_
             # in,depth_i torch.Size([1, 64, 48])
             mask = mask*(depth_i > 0)
             print('in,mask',mask.shape)
+            print('===================',mask)
             # in,mask torch.Size([1, 64, 48])
             depth_i[~mask] = 100
             depth_proj.append(depth_i)
@@ -131,9 +134,11 @@ def get_key_value(key_value, xy_l, xy_r, depth_query, depths, ori_h, ori_w, ori_
 
             xy_l_norm[..., 0] = xy_l_norm[..., 0]/(w-1)*2-1
             xy_l_norm[..., 1] = xy_l_norm[..., 1]/(h-1)*2-1
+            print('===================',xy_l_norm)
             xy_l_norm = xy_l_norm.to(dtype=key_value.dtype)
-            _key_value = F.grid_sample(
-                key_value, xy_l_norm, align_corners=True)
+            _key_value = F.grid_sample(key_value, xy_l_norm, align_corners=True)
+            # _key_value = F.grid_sample(key_value, xy_l_norm, padding_mode="zeros",align_corners=True)
+            # from IPython import embed; embed()
             key_values.append(_key_value)
 
     xy_proj = torch.stack(xy_proj, dim=1)
@@ -157,7 +162,7 @@ def get_key_value(key_value, xy_l, xy_r, depth_query, depths, ori_h, ori_w, ori_
     
     # xy = torch.tensor(xy, device=key_value.device).float()[
     #     None].repeat(xy_proj.shape[0], 1, 1, 1)   
-    
+    print('-depth_query',depth_query)
     xy_rel = (depth_query-depth_proj).abs()[...,None] # depth check
 
     xy_rel = rearrange(xy_rel, '(b n) h w c -> b n h w c', b=b)
@@ -168,7 +173,10 @@ def get_key_value(key_value, xy_l, xy_r, depth_query, depths, ori_h, ori_w, ori_
     # 1 1 64 48
     print('key_values',key_values.shape)
     print('xy_rel',xy_rel.shape)
+    print('--------------',xy_rel)
     print('mask_proj',mask_proj.shape)
+    print('--------------',mask_proj)
+
     # key_values torch.Size([1, 1, 320, 64, 48])
     # xy_rel torch.Size([1, 1, 64, 48, 1])
     # mask_proj torch.Size([1, 1, 64, 48])
@@ -176,6 +184,7 @@ def get_key_value(key_value, xy_l, xy_r, depth_query, depths, ori_h, ori_w, ori_
 
 # query, key_value, key_value_xy, mask = get_query_value(
 #                     x_left, x_right, xy_l, xy_r, depth_query, _depths, img_h, img_w, img_h, img_w)
+# 
 def get_query_value(query, key_value, xy_l, xy_r, depth_query, depths, img_h_l, img_w_l, img_h_r=None, img_w_r=None):
     if img_h_r is None:
         img_h_r = img_h_l
@@ -185,14 +194,18 @@ def get_query_value(query, key_value, xy_l, xy_r, depth_query, depths, img_h_l, 
     # print('!!',  query.shape  )
     # torch.Size([1, 320, 64, 48])
     m = key_value.shape[1]
+    # m=1
     # torch.Size([1, 1, 320, 64, 48])
     key_values = []
     masks = []
     xys = []
     # guess
     # xy_l torch.Size([1, 1, 512, 384,2])
+    # xy_r torch.Size([1, 1, 512, 384,2])
     print('get_query_value:xy_l',xy_l.shape)
     # get_query_value:xy_l torch.Size([1, 1, 1024, 768, 2])
+    # depth_query 1 512 384
+    # depths  1 1 512 384
     for i in range(m):
         _, _, q_h, q_w = query.shape
         _key_value, _xy, _mask = get_key_value(key_value[:, i], xy_l[:, i], xy_r[:, i], depth_query, depths[:, i],

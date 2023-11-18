@@ -518,9 +518,10 @@ class UNet2DConditionModel(ModelMixin, ConfigMixin, UNet2DConditionLoadersMixin)
             [`~models.unet_2d_condition.UNet2DConditionOutput`] if `return_dict` is True, otherwise a `tuple`. When
             returning a tuple, the first element is the sample tensor.
         """
+        # torch.Size([2, 10, 6, 64, 48])
         _, m, _, h_lr, w_lr = sample.shape
         sample = rearrange(sample, 'b m c h w -> (b m) c h w')
-
+        # 20 6 64 48
         # By default samples have to be AT least a multiple of the overall upsampling factor.
         # The overall upsampling factor is equal to 2 ** (# num of upsampling layears).
         # However, the upsampling interpolation output size can be forced to fit any upsampling size
@@ -550,7 +551,7 @@ class UNet2DConditionModel(ModelMixin, ConfigMixin, UNet2DConditionLoadersMixin)
         
         # print('sample.shape',sample.shape)
         # torch.Size([2, 10, 6, 64, 48])
-        reso_lr = h_lr*8, w_lr*8
+        reso_lr = 1024,768
         cp_mask=torch.ones(m, m, device=sample.device)
         for i in range(m):
             cp_mask[i, i]=0
@@ -673,7 +674,7 @@ class UNet2DConditionModel(ModelMixin, ConfigMixin, UNet2DConditionLoadersMixin)
                 )
             else:
                 sample = upsample_block(
-                    hidden_states=sample, temb=emb, res_hidden_states_tuple=res_samples, upsample_size=upsample_size,
+                    hidden_states=sample, temb=emb, res_hidden_states_tuple=res_samples, upsample_size=upsample_size
                 )
 
         # 6. post-process

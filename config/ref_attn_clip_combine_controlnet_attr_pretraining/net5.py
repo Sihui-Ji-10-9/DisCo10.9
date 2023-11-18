@@ -1,6 +1,6 @@
 import torch
 from utils.dist import synchronize, get_rank
-from .crossframeattn_base import CrossFrameAttnProcessor
+from .crossframeattn import CrossFrameAttnProcessor
 from config import *
 from typing import Callable, List, Optional, Union
 
