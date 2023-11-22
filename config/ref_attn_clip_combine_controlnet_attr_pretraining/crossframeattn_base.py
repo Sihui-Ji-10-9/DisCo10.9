@@ -27,6 +27,9 @@ class CrossFrameAttnProcessor:
             encoder_hidden_states=None,
             attention_mask=None,
             meta=None,
+            m=None,
+            reso=None,
+            inner_dim=None,
         ):
         # None
         # print('attn',attn)
@@ -49,7 +52,7 @@ class CrossFrameAttnProcessor:
         key = attn.to_k(encoder_hidden_states)
         value = attn.to_v(encoder_hidden_states)
         # encoder_hidden_states torch.Size([20, 3072, 320])
-        print('k',key.shape)
+        # print('k',key.shape)
         # k torch.Size([20, 3072, 320])
         # print('q',query.shape)
         # print('v',value.shape)

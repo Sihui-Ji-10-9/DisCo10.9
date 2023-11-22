@@ -795,7 +795,7 @@ class Net(nn.Module):
         # refer_latents = refer_latents.repeat(10,1,1)
         refer_latents = torch.cat([repeat(refer_latents[0, :, :], "c k -> f c k", f=10),
                                    repeat(refer_latents[1, :, :], "c k -> f c k", f=10)])
-        print('refer_latents',refer_latents.shape)
+        # print('refer_latents',refer_latents.shape)
         # torch.Size([20, 235, 768])
         # torch.Size([20, 973, 768])
         if self.args.ref_null_caption: # test must use null caption
@@ -890,11 +890,11 @@ class Net(nn.Module):
             generator,
             latents=None,
         )
-        print('latents',latents.shape)
+        # print('latents',latents.shape)
         # torch.Size([1, 4, 32, 24])
         # torch.Size([1, 4, 64, 48])
         latents = latents.repeat(1,10,1,1,1)
-        print('latents',latents.shape)
+        # print('latents',latents.shape)
         # torch.Size([10, 4, 32, 24])
         # torch.Size([1,10, 4, 64, 48])
         # Prepare extra step kwargs.
@@ -914,7 +914,7 @@ class Net(nn.Module):
                 # Add pose to noisy latents
                 _, _, _, h, w = latent_model_input.shape
                 # densepose torch.Size([10, 2, 1024, 768])
-                print('densepose',densepose.shape)
+                # print('densepose',densepose.shape)
                 # torch.Size([1, 10, 2, 1024, 768])
                 if do_classifier_free_guidance:
                     # print('---',torch.zeros(densepose.shape).shape)
@@ -931,11 +931,11 @@ class Net(nn.Module):
                 pose_input = rearrange(pose_input, 'b m c h w -> (b m) c h w')
                 pose_input= F.interpolate(pose_input, (h,w)).cuda().to(dtype=self.dtype)
                 pose_input = rearrange(pose_input, '(b m) c h w -> b m c h w', b=bb)
-                print('pose_input',pose_input.shape) 
+                # print('pose_input',pose_input.shape) 
                 # torch.Size([20, 2, 32, 24])
                 # torch.Size([2, 10, 2, 64, 48])
                 latent_model_input = torch.cat((latent_model_input.cuda(), pose_input), 2)
-                print('latent_model_input',latent_model_input.shape)
+                # print('latent_model_input',latent_model_input.shape)
                 # torch.Size([20, 6, 32, 24])
                 # torch.Size([20, 6, 64, 48])  
                 # torch.Size([2, 10, 6, 64, 48])
@@ -982,7 +982,7 @@ class Net(nn.Module):
                     progress_bar.update()
 
         # Post-processing
-        print('===',latents.shape)
+        # print('===',latents.shape)
         # torch.Size([10, 4, 32, 24])
         # === torch.Size([1, 10, 4, 64, 48])
         latents = rearrange(latents, 'b m c h w -> (b m) c h w')

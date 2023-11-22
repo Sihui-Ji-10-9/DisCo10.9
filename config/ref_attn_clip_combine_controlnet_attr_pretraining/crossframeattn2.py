@@ -35,7 +35,6 @@ class CrossFrameAttnProcessor:
         # None
         # print('attn',attn)
         # attn CrossAttention(
-        
         # print('hidden_states.shape',hidden_states.shape)
         # torch.Size([20, 3072, 320])
         # 0.
@@ -55,7 +54,7 @@ class CrossFrameAttnProcessor:
         # img_w=768
         # outs_q = []
         # outs_k = []
-        # outs_m = []
+        outs_m = []
         outs = []
         pe = PosEmbedding(2, inner_dim//2)
         # poses = meta['poses']
@@ -76,15 +75,15 @@ class CrossFrameAttnProcessor:
         correspondence = correspondence.repeat(2,1,1,1,1,1)
         # print('correspondence',correspondence.shape)
         # correspondence torch.Size([2, 10, 10, 1024, 768, 2])
-        # correspondence torch.Size([1, 10, 10, 1024, 768, 2])
         # overlap_mask=meta['overlap_mask']
 
         for b_i in range(b):
             # x_outs_q=[]
             # x_outs_k=[]
-            # x_outs_m=[]
+            x_outs_m=[]
             x_outs=[]
             for i in range(m):
+                # print(i,'::::')
                 # indexs = [j for j in range(m) if overlap_mask[b_i, i, j] and i!=j]
                 # if len(indexs)==0: # if the image does not have overlap with others, use the nearby images
                 #     if i==0:
@@ -100,6 +99,7 @@ class CrossFrameAttnProcessor:
                 x_right = []
                 # print('===',i)
                 # print('+++',b_i)
+                # correspondence torch.Size([2, 10, 10, 1024, 768, 2])
                 xy_l = correspondence[b_i:b_i+1, i, indexs]
                 # print('trans:xy_l',xy_l.shape)
                 # trans:xy_l torch.Size([1, 1, 1024,768, 2])
@@ -121,6 +121,8 @@ class CrossFrameAttnProcessor:
                 # trans:depths torch.Size([2, 10, 1024, 768])
                 _depths=depths[b_i:b_i+1, indexs]
                 depth_query=depths[b_i:b_i+1, i]
+                # print(depth_query.min(),depth_query.max())
+                # print(_depths.min(),_depths.max())
                 # print('trans:depth_query',depth_query.shape)
                 # trans:depth_query torch.Size([1, 1024, 768])
                 # _depths torch.Size([1,1, 512, 384])
@@ -164,42 +166,50 @@ class CrossFrameAttnProcessor:
                 # query[:, 0]
                 #  3072 320 
                 out_m = rearrange(mask[:, 0], '(b h w) c -> b c h w', h=h, w=w)
+                # 1 1 64 48
                 out_q = rearrange(query[:, 0], '(b h w) c -> b c h w', h=h, w=w)
                 # 1 320 64 48 
                 out_k = rearrange(key_value[:, 0], '(b h w) c -> b c h w', h=h, w=w)
                 # 1 320 64 48
-                out_ = out_k*out_m+(~out_m)*out_q
+                # out_ = out_k*out_m+(~out_m)*out_q
+                # print('----',torch.sum(out_k!=0),torch.sum(out_m!=0))
+                print('----',torch.sum(out_m!=0)/out_m.numel())
+                # ---- tensor(72960, device='cuda:0') tensor(114, device='cuda:0')
+                out_ = out_k*out_m
+                # 1 320 64 48
                 x_outs.append(out_)
                 # x_outs_q.append(out_q)
                 # x_outs_k.append(out_k)
-                # x_outs_m.append(out_m)
+                x_outs_m.append(out_m)
             x_outs=torch.cat(x_outs)
             # x_outs_q=torch.cat(x_outs_q)
             # x_outs_k=torch.cat(x_outs_k)
-            # x_outs_m=torch.cat(x_outs_m)
+            x_outs_m=torch.cat(x_outs_m)
             # x_outs torch.Size([10, 320, 64, 48])
             # 10 320 64 48
             outs.append(x_outs)
             # outs_q.append(x_outs_q)
             # outs_k.append(x_outs_k)
-            # outs_m.append(x_outs_m)
+            outs_m.append(x_outs_m)
             # print('x_outs_q',x_outs_q.shape)
             # x_outs torch.Size([10, 320, 64, 48])
         # out_q = torch.stack(outs_q)
         # out_k = torch.stack(outs_k)
-        # out_m = torch.stack(outs_m)
+        outm = torch.stack(outs_m)
         out = torch.stack(outs)
         # print('out',out.shape)
         # out torch.Size([2, 10, 320, 64, 48])
+        
         out=rearrange(out, 'b m c h w -> (b m) (h w) c')
         # out_q=rearrange(out_q, 'b m c h w -> (b m) c h w')
         # out_k=rearrange(out_k, 'b m c h w -> (b m) c h w')
-        # out_m=rearrange(out_m, 'b m c h w -> (b m) c h w')
+        outm=rearrange(outm, 'b m c h w -> (b m) (h w) c')
+        # print('outm',outm.shape)
+        # torch.Size([20, 3072, 320])
         # torch.Size([20, 3072, 320])
         out = out.to(dtype=hidden_states.dtype)
         # out_q = out_q.to(dtype=hidden_states.dtype)
         # out_k = out_k.to(dtype=hidden_states.dtype)
-        # out_m = out_m.to(dtype=hidden_states.dtype)
 
         # base:# torch.Size([20, 320, 64, 48])
 
@@ -211,13 +221,17 @@ class CrossFrameAttnProcessor:
 
         is_cross_attention = encoder_hidden_states is not None
         if encoder_hidden_states is None:
-            # encoder_hidden_states = hidden_states
-            encoder_hidden_states = out
+            encoder_hidden_states = hidden_states
         elif attn.cross_attention_norm:
             encoder_hidden_states = attn.norm_cross(encoder_hidden_states)
         # print('encoder_hidden_states',encoder_hidden_states.shape)
         key = attn.to_k(encoder_hidden_states)
         value = attn.to_v(encoder_hidden_states)
+
+        # if not is_cross_attention:
+        #     key_out = attn.to_k(out)
+        #     value_out = attn.to_v(out)
+
         # encoder_hidden_states torch.Size([20, 3072, 320])
         # print('k',key.shape)
         # k torch.Size([20, 3072, 320])
@@ -225,7 +239,7 @@ class CrossFrameAttnProcessor:
         # print('v',value.shape)
         # same
         # print('-----!!')
-        '''
+        
         # Sparse Attention
         if not is_cross_attention:
             # print('--',key.size()[0],self.unet_chunk_size)
@@ -242,7 +256,7 @@ class CrossFrameAttnProcessor:
             value = rearrange(value, "(b f) d c -> b f d c", f=video_length)
             value = value[:, former_frame_index]
             value = rearrange(value, "b f d c -> (b f) d c")
-        '''
+        
         query = attn.head_to_batch_dim(query)
         # torch.Size([160, 3072, 40])
         key = attn.head_to_batch_dim(key)
@@ -260,6 +274,12 @@ class CrossFrameAttnProcessor:
         hidden_states = attn.batch_to_head_dim(hidden_states)
         # hidden_states torch.Size([20, 3072, 320])
         # from IPython import embed; embed()
+        # print('----',torch.sum(outm!=0)/outm.numel())
+        # --- tensor(1460480, device='cuda:0') tensor(2282, device='cuda:0')
+        if not is_cross_attention:
+            hidden_states = hidden_states*(~outm)+outm*out
+
+
         # linear proj
         hidden_states = attn.to_out[0](hidden_states)
         # dropout
