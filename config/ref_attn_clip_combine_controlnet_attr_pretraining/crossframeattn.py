@@ -61,14 +61,20 @@ class CrossFrameAttnProcessor:
         # poses = meta['poses']
         # K = meta['K']
         # print('densepose',meta['densepose'].shape)
+        # print('imap',meta['imap'].shape)
+        # densepose torch.Size([1, 10, 2, 1024, 768])
+        # imap torch.Size([1, 10, 1, 1024, 768])
         # torch.Size([1, 10, 2, 1024, 768])
         # depths = meta['densepose'][:, :,:,1::2,1::2][:,:,0,:,:]
         
-        depths = meta['densepose'][:,:,0,:,:]
+        depths = meta['uv'][:,:,0,:,:]
         depths = depths.repeat(2,1,1,1)
+        imap = meta['imap'][:,:,0,:,:]
+        imap = imap.repeat(2,1,1,1)
         # print('depths',depths.shape)
+        # print('imap',imap.shape)
         # torch.Size([2, 10,1024, 768])
-        # torch.Size([1, 10,1024, 768])
+        # torch.Size([2, 10,1024, 768])
 
         # correspondence = meta['correspondence'][:, :,:,1::2,1::2]
         
@@ -121,13 +127,19 @@ class CrossFrameAttnProcessor:
                 # trans:depths torch.Size([2, 10, 1024, 768])
                 _depths=depths[b_i:b_i+1, indexs]
                 depth_query=depths[b_i:b_i+1, i]
+                _imap=imap[b_i:b_i+1, indexs]
+                imap_query=imap[b_i:b_i+1, i]
+                # print('trans:imap_query',imap_query.shape)
+                # print('trans:_imap',_imap.shape)
+                # trans:imap_query torch.Size([1, 1024, 768])
+                # trans:_imap torch.Size([1, 1, 1024, 768])
                 # print('trans:depth_query',depth_query.shape)
                 # trans:depth_query torch.Size([1, 1024, 768])
                 # _depths torch.Size([1,1, 512, 384])
                 # _K=K[b_i:b_i+1]
                 
                 query, key_value, key_value_xy, mask = get_query_value(
-                    x_left, x_right, xy_l, xy_r, depth_query, _depths, img_h, img_w, img_h, img_w)
+                    x_left, x_right, xy_l, xy_r, depth_query, _depths, imap_query, _imap, img_h, img_w, img_h, img_w)
                 # query [1, 320, 64, 48]
                 # key_value [1, 1,320, 64, 48]
                 # key_value_xy 1 1 64 48 1
@@ -169,6 +181,7 @@ class CrossFrameAttnProcessor:
                 out_k = rearrange(key_value[:, 0], '(b h w) c -> b c h w', h=h, w=w)
                 # 1 320 64 48
                 out_ = out_k*out_m+(~out_m)*out_q
+                # print('----',torch.sum(out_m!=0)/out_m.numel())
                 x_outs.append(out_)
                 # x_outs_q.append(out_q)
                 # x_outs_k.append(out_k)

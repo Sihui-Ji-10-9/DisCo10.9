@@ -64,7 +64,7 @@ def get_correspondence(depth, pose, K, x_2d):
 
     return x2d, x3d
 
-def get_key_value(key_value, xy_l, xy_r, depth_query, depths, ori_h, ori_w, ori_h_r, ori_w_r, query_h, query_w):
+def get_key_value(key_value, xy_l, xy_r, depth_query, depths, imap_query, imap, ori_h, ori_w, ori_h_r, ori_w_r, query_h, query_w):
 
     b, c, h, w = key_value.shape
     # torch.Size([1, 320, 64, 48])
@@ -95,6 +95,8 @@ def get_key_value(key_value, xy_l, xy_r, depth_query, depths, ori_h, ori_w, ori_
     # depth_query # torch.Size([1, 512, 384])
     # depths torch.Size([1, 512, 384])
     depth_query = depth_query[:, query_scale//2::query_scale,query_scale//2::query_scale]
+    imap = imap[:, query_scale//2::query_scale,query_scale//2::query_scale]
+    imap_query = imap_query[:, query_scale//2::query_scale,query_scale//2::query_scale]
     # depth_query torch.Size([1, 64, 48])
     for i in range(0-kernal_size//2, 1+kernal_size//2):
         for j in range(0-kernal_size//2, 1+kernal_size//2):
@@ -109,6 +111,9 @@ def get_key_value(key_value, xy_l, xy_r, depth_query, depths, ori_h, ori_w, ori_
             xy_l_round = xy_l_rescale.round().long()
             mask = (xy_l_round[..., 0] >= 0)*(xy_l_round[..., 0] < ori_w) * (
                 xy_l_round[..., 1] >= 0)*(xy_l_round[..., 1] < ori_h)
+            # print(imap.shape)
+            mask_head = imap>22.5
+            mask_bg = imap<0.5
             # print('1',torch.sum(mask!=0)/mask.numel())
             xy_l_round[..., 0] = torch.clamp(xy_l_round[..., 0], 0, ori_w-1)
             xy_l_round[..., 1] = torch.clamp(xy_l_round[..., 1], 0, ori_h-1)
@@ -123,18 +128,20 @@ def get_key_value(key_value, xy_l, xy_r, depth_query, depths, ori_h, ori_w, ori_
             # depth_i torch.Size([1(b),64, 48])
             # print('in,depth_i',depth_i.shape)
             # in,depth_i torch.Size([1, 64, 48])
-            '''
+            
             mask = mask*(depth_i > 0)
-            '''
+            
             # print('2',torch.sum(mask!=0)/mask.numel())
             # print('in,mask',mask.shape)
             # print('===================',mask)
             # in,mask torch.Size([1, 64, 48])
             depth_i[~mask] = 100
             depth_proj.append(depth_i)
-            '''
-            mask = mask*(depth_query>0)
-            '''
+            
+            # mask = mask*(depth_query>0)
+            
+            mask = mask+mask_head
+            
             # print('3',torch.sum(mask!=0)/mask.numel())
             mask_proj.append(mask)
 
@@ -193,7 +200,7 @@ def get_key_value(key_value, xy_l, xy_r, depth_query, depths, ori_h, ori_w, ori_
 # query, key_value, key_value_xy, mask = get_query_value(
 #                     x_left, x_right, xy_l, xy_r, depth_query, _depths, img_h, img_w, img_h, img_w)
 # 
-def get_query_value(query, key_value, xy_l, xy_r, depth_query, depths, img_h_l, img_w_l, img_h_r=None, img_w_r=None):
+def get_query_value(query, key_value, xy_l, xy_r, depth_query, depths, imap_query, imap, img_h_l, img_w_l, img_h_r=None, img_w_r=None):
     if img_h_r is None:
         img_h_r = img_h_l
         img_w_r = img_w_l
@@ -214,7 +221,7 @@ def get_query_value(query, key_value, xy_l, xy_r, depth_query, depths, img_h_l, 
     # depths  1 1 512 384
     for i in range(m):
         _, _, q_h, q_w = query.shape
-        _key_value, _xy, _mask = get_key_value(key_value[:, i], xy_l[:, i], xy_r[:, i], depth_query, depths[:, i],
+        _key_value, _xy, _mask = get_key_value(key_value[:, i], xy_l[:, i], xy_r[:, i], depth_query, depths[:, i],imap_query,imap[:, i],
                                                img_h_l, img_w_l, img_h_r, img_w_r, q_h, q_w)
 
         key_values.append(_key_value)

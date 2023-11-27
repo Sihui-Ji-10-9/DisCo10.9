@@ -144,7 +144,7 @@ class BaseDataset(TsvCondImgCompositeDataset):
         # ref and target image are the same 
         meta_data['ref_img_key'] = img_key
         if self.args.base:
-            meta_data['reference_img'] = img
+            meta_data['reference_img'] = img 
         else:
             meta_data['reference_img'] = self.get_cloth(img_idx)
         if self.args.add_shape:
@@ -158,6 +158,8 @@ class BaseDataset(TsvCondImgCompositeDataset):
         if not self.args.no_smpl:
             meta_data['smpl'] = self.get_smpl(img_idx)
         meta_data['dp'] = self.get_dp(img_key)
+        meta_data['uv'] = self.get_uvmap(img_key)
+        meta_data['imap'] = self.get_imap(img_key)
         meta_data['correspondence'] = self.get_cor(img_key)
         # print('img',meta_data['img'])
         # print('dp',meta_data['dp'])
@@ -193,10 +195,66 @@ class BaseDataset(TsvCondImgCompositeDataset):
             # torch.Size([2, 1024, 768])
         dp_list = torch.cat(dp_list,dim=0)
         
+        # print('dp_list0',dp_list.shape)
+        # torch.Size([10, 2, 1024, 768])
+        # torch.Size([20, 1024, 768])
+        # torch.Size([2,10, 1024, 768])
+        return dp_list
+    
+    def get_imap(self, img_key):
+        # print('self.dp_file',self.dp_file)
+        # /HOME/HOME/jisihui/VITON-hd-resized/try/densepose
+        # dp_path=self.dp_file+'/'+img_key+'.npy'
+        dp_name_list = os.listdir(self.imap_file)
+        dp_paths = [ self.imap_file + '/' + dp_name for dp_name in dp_name_list]
+        dp_paths.sort()
+        dp_list=[]
+        for dp_path in dp_paths:
+            if not os.path.exists(dp_path):
+                print('error!!')
+            # print(dp_path)
+            dp = F.interpolate(torch.from_numpy(np.load(dp_path).astype('float32')).unsqueeze(0), (self.height_base, self.width_base), mode='bilinear')
+            # print('before==',dp.shape)
+            #  torch.Size([1, 1024, 768])
+            # print('before==',dp.unsqueeze(0).shape)
+            # before== torch.Size([1, 1, 1024, 768])
+            dp_list.append(dp)
+            
+            # torch.Size([2, 1024, 768])
+        dp_list = torch.cat(dp_list,dim=0)
+        
         # print('dp_list',dp_list.shape)
         # torch.Size([20, 1024, 768])
         # torch.Size([2,10, 1024, 768])
         return dp_list
+    
+    def get_uvmap(self, img_key):
+        # print('self.dp_file',self.dp_file)
+        # /HOME/HOME/jisihui/VITON-hd-resized/try/densepose
+        # dp_path=self.dp_file+'/'+img_key+'.npy'
+        dp_name_list = os.listdir(self.dp_file)
+        dp_paths = [ self.dp_file + '/' + dp_name for dp_name in dp_name_list]
+        dp_paths.sort()
+        dp_list=[]
+        for dp_path in dp_paths:
+            if not os.path.exists(dp_path):
+                print('error!!')
+            # print(dp_path)
+            dp = F.interpolate(torch.from_numpy(np.load(dp_path).astype('float32')).unsqueeze(0), (self.height_base, self.width_base), mode='bilinear')
+            # print('before==',dp.shape)
+            #  torch.Size([1, 1024, 768])
+            # print('before==',dp.unsqueeze(0).shape)
+            # before== torch.Size([1, 1, 1024, 768])
+            dp_list.append(dp)
+            
+            # torch.Size([2, 1024, 768])
+        dp_list = torch.cat(dp_list,dim=0)
+        
+        # print('dp_list',dp_list.shape)
+        # torch.Size([20, 1024, 768])
+        # torch.Size([2,10, 1024, 768])
+        return dp_list
+    
     def get_cor(self, img_key):
         # print('self.dp_file',self.dp_file)
         # /HOME/HOME/jisihui/VITON-hd-resized/try/densepose
@@ -221,9 +279,10 @@ class BaseDataset(TsvCondImgCompositeDataset):
             # [1,1024,768,2]
             
             # torch.Size([2, 1024, 768])
-        cor_list = torch.cat(cor_list,dim=0)
+        cor_list = torch.cat(cor_list,dim=0).unsqueeze(1)
         # [10,1024,768,2]
-        cor_list = cor_list.repeat(10, 1, 1, 1, 1)
+        # torch.Size([10, 1, 1024, 768, 2])
+        cor_list = cor_list.repeat(1, 10, 1, 1, 1)
         # print('cor_list',cor_list.shape)
         # [10, 10, 1024, 768, 2] 
         # cor_list = cor_list.repeat(2,1, 1, 1, 1, 1)
@@ -301,6 +360,8 @@ class BaseDataset(TsvCondImgCompositeDataset):
         img_key = raw_data['img_key']
         ref_img_key = raw_data['ref_img_key']
         densepose = raw_data['dp']
+        imap = raw_data['imap']
+        uv = raw_data['uv']
         correspondence = raw_data['correspondence']
         # torch.Size([2, 1024, 768])
         # first check the size of the ref image
@@ -342,14 +403,17 @@ class BaseDataset(TsvCondImgCompositeDataset):
             reference_img = reference_img * reference_img_mask# foreground
 
         # caption = raw_data['caption']
-        outputs = {'img_key':img_key, 'label_imgs': img,  'densepose':densepose,'correspondence':correspondence, 'reference_img': reference_img, 'reference_img_controlnet':reference_img_controlnet, 'reference_img_vae':reference_img_vae}
+        outputs = {'img_key':img_key, 'label_imgs': img, 'uv':uv,'imap': imap, 'densepose':densepose,'correspondence':correspondence, 'reference_img': reference_img, 'reference_img_controlnet':reference_img_controlnet, 'reference_img_vae':reference_img_vae}
         if self.args.combine_use_mask:
             outputs['background_mask'] = (1 - reference_img_mask)
         if skeleton_img is not None:
             outputs.update({'cond_imgs': skeleton_img})
         if self.args.add_shape:
             outputs.update({'shape': shape})
-        # print('==correspondence',correspondence.shape)
+        # print('==densepose',densepose.shape)
+        # print('==imap',imap.shape)
         # torch.Size([20, 1024, 768])
         # torch.Size([10,1024, 768,2])
+        # ==imap torch.Size([10, 1, 1024, 768])
+        # ==densepose torch.Size([10, 2, 1024, 768])
         return outputs

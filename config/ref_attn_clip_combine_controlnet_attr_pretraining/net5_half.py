@@ -1,6 +1,6 @@
 import torch
 from utils.dist import synchronize, get_rank
-from .crossframeattn import CrossFrameAttnProcessor
+from .crossframeattn_half import CrossFrameAttnProcessor
 from config import *
 from typing import Callable, List, Optional, Union
 
@@ -32,8 +32,6 @@ from dinov2.dinov_2 import get_dinov2_model
 
 from einops import rearrange
 import imageio
-from consistencydecoder import ConsistencyDecoder
-
 class Net(nn.Module):
     def __init__(
         self, args
@@ -80,7 +78,6 @@ class Net(nn.Module):
         print(f"Loading pre-trained vae from {args.pretrained_model_path}/vae")
         vae = AutoencoderKL.from_pretrained(
             args.pretrained_model_path, subfolder="vae")
-        decoder_consistency = ConsistencyDecoder(device="cuda:0") # Model size: 2.49 GB
         print(f"Loading pre-trained unet from {self.args.pretrained_model_path}/unet")
         unet = UNet2DConditionModel.from_pretrained(
             self.args.pretrained_model_path, subfolder="unet")
@@ -183,7 +180,6 @@ class Net(nn.Module):
         self.tr_noise_scheduler = tr_noise_scheduler
         self.noise_scheduler = noise_scheduler
         self.vae = vae
-        self.decoder_consistency = decoder_consistency
         # self.controlnet = controlnet_unit
         self.unet = unet
         self.feature_extractor = feature_extractor
@@ -320,8 +316,7 @@ class Net(nn.Module):
 
     def image_decoder(self, latents):
         latents = 1/self.scale_factor * latents
-        # dec = self.vae.decode(latents).sample
-        dec = self.decoder_consistency(latents)
+        dec = self.vae.decode(latents).sample
         image = (dec / 2 + 0.5).clamp(0, 1)
         return image
 

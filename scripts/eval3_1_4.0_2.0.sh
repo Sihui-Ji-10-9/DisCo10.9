@@ -13,4 +13,4 @@ python finetune_sdm_yaml.py \
 --ref_null_caption False \
 --combine_clip_local --combine_use_mask --viton_hd --no_smpl --use_cf_attn \
 --stage1_pretrain_path /home/nfs/jsh/DisCo/exp/pretrain_3.0_1_dino_hd/22499.pth/mp_rank_00_model_states.pt \
---eval_save_filename /home/nfs/jsh/DisCo/eval/eval_pt3.0_1_dino_hd_try7.0_fix_fat_vedio4_try1_2
+--eval_save_filename /home/nfs/jsh/DisCo/eval/eval_pt3.0_1_dino_hd_try7.0_fix_fat_vedio4_try1_4
