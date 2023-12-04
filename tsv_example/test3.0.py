@@ -26,6 +26,8 @@ dp_i_path0 = '/home/nfs/jsh/HOME/VITON-hd-resized/try2.0/densepose_i_big/00069_0
 data0_uv = np.load(dp_path0)
 data0_i = np.load(dp_i_path0)
 data0_uv = (data0_uv - mean) / std
+print('data0_uv',data0_uv.shape)
+print('data0_i',data0_i.shape)
 data0 = np.concatenate([data0_uv,data0_i],axis=0)
 cor=[]
 # from IPython import embed; embed()
@@ -53,7 +55,7 @@ for i in range(len(file_paths_uv)):
                     c[i,j,0]=np.mean(item[0]).round()
                     c[i,j,1]=np.mean(item[1]).round()
                     # c[i,j]=[np.mean(item[0]).round(),np.mean(item[1]).round()]
-    save_path = path_uv_i.replace('densepose_fat', 'densepose_fat_cor_new11.0')
+    save_path = path_uv_i.replace('densepose_big', 'densepose_fat_cor_new11.0')
     np.save(save_path, c,allow_pickle=True)
     cor.append(c)
 cor = np.array(cor)

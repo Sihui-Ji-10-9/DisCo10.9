@@ -15,13 +15,13 @@ file_paths_i.sort()
 print(file_paths_uv)
 print(file_paths_i)
 
-directory = '/home/nfs/jsh/HOME/VITON-hd-resized/try2.0/densepose_fat_cor_new13.0'
+directory = '/home/nfs/jsh/HOME/VITON-hd-resized/try2.0/densepose_fat_cor_new19.0'
 os.makedirs(directory, exist_ok=True)
 
 # dp_path0 = '/HOME/HOME/jisihui/VITON-hd-resized/try/densepose/00006_00.jpg.npy'
-dp_path0 = '/home/nfs/jsh/HOME/VITON-hd-resized/try2.0/densepose_fat/00069_00 copy 2.jpg.npy'
+dp_path0 = '/home/nfs/jsh/HOME/VITON-hd-resized/try2.0/densepose_fat/00069_00 copy 7.jpg.npy'
 # dp_i_path0 = '/HOME/HOME/jisihui/VITON-hd-resized/try/densepose_i/00006_00.jpg.npy'
-dp_i_path0 = '/home/nfs/jsh/HOME/VITON-hd-resized/try2.0/densepose_i_fat/00069_00 copy 2.jpg.npy'
+dp_i_path0 = '/home/nfs/jsh/HOME/VITON-hd-resized/try2.0/densepose_i_fat/00069_00 copy 7.jpg.npy'
 
 data0_uv = np.load(dp_path0)
 data0_i = np.load(dp_i_path0)
@@ -43,7 +43,7 @@ for i in range(len(file_paths_uv)):
         for j in range(768):
             # item=np.where(data0[:]==data1[:,i,j])
             if data0[2,i,j]!=0:
-                item=np.where((np.abs(data_i[0]-data0[0,i,j])<0.02)&(np.abs(data_i[1]-data0[1,i,j])<0.02)&(np.abs(data_i[2]-data0[2,i,j])<0.5))
+                item=np.where((np.abs(data_i[0]-data0[0,i,j])<0.008)&(np.abs(data_i[1]-data0[1,i,j])<0.008)&(np.abs(data_i[2]-data0[2,i,j])<0.5))
                 # item=np.where((data_i[0]==data0[0,i,j])&(data_i[1]==data0[1,i,j])&(data_i[2]==data0[2,i,j]))
                 # print(item)
                 if item[0].size > 0:
@@ -53,11 +53,11 @@ for i in range(len(file_paths_uv)):
                     c[i,j,0]=np.mean(item[0]).round()
                     c[i,j,1]=np.mean(item[1]).round()
                     # c[i,j]=[np.mean(item[0]).round(),np.mean(item[1]).round()]
-    save_path = path_uv_i.replace('densepose_fat', 'densepose_fat_cor_new13.0')
+    save_path = path_uv_i.replace('densepose_fat', 'densepose_fat_cor_new19.0')
     np.save(save_path, c,allow_pickle=True)
     cor.append(c)
 cor = np.array(cor)
-np.save('/home/nfs/jsh/HOME/VITON-hd-resized/try2.0/cor13.0.npy', cor,allow_pickle=True)
+np.save('/home/nfs/jsh/HOME/VITON-hd-resized/try2.0/cor19.0.npy', cor,allow_pickle=True)
 print(cor.shape)
 # 10 1024 768 2
 # 6-16个点

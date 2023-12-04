@@ -1,6 +1,6 @@
 import torch
 from utils.dist import synchronize, get_rank
-from .crossframeattn_base import CrossFrameAttnProcessor
+from .crossframeattn import CrossFrameAttnProcessor
 from config import *
 from typing import Callable, List, Optional, Union
 
@@ -20,6 +20,9 @@ from diffusers.schedulers import DDIMScheduler, PNDMScheduler, DDPMScheduler, Un
 
 from diffusers.utils import deprecate, PIL_INTERPOLATION
 from diffusers.utils.import_utils import is_xformers_available
+
+from visualizer import get_local
+get_local.activate() # 激活装饰器
 
 # from diffusers.models import UNet2DConditionModel
 from .unet_2d_condition import UNet2DConditionModel
@@ -753,6 +756,119 @@ class Net(nn.Module):
         return image
     
     @torch.no_grad()
+    def image2latent(self, image):
+        # DEVICE = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
+        if type(image) is Image:
+            image = np.array(image)
+            image = torch.from_numpy(image).float() / 127.5 - 1
+            image = image.permute(2, 0, 1).unsqueeze(0).to(device=self.device)
+        # input image density range [-1, 1]
+        latents = self.vae.encode(image)['latent_dist'].mean
+        latents = latents * 0.18215
+        return latents
+    
+    def next_step(
+        self,
+        model_output: torch.FloatTensor,
+        timestep: int,
+        x: torch.FloatTensor,
+        eta=0.,
+        verbose=False
+    ):
+        """
+        Inverse sampling for DDIM Inversion
+        """
+        if verbose:
+            print("timestep: ", timestep)
+        next_step = timestep
+        timestep = min(timestep - self.noise_scheduler.config.num_train_timesteps // self.noise_scheduler.num_inference_steps, 999)
+        alpha_prod_t = self.noise_scheduler.alphas_cumprod[timestep] if timestep >= 0 else self.noise_scheduler.final_alpha_cumprod
+        alpha_prod_t_next = self.noise_scheduler.alphas_cumprod[next_step]
+        beta_prod_t = 1 - alpha_prod_t
+        pred_x0 = (x - beta_prod_t**0.5 * model_output) / alpha_prod_t**0.5
+        pred_dir = (1 - alpha_prod_t_next)**0.5 * model_output
+        x_next = alpha_prod_t_next**0.5 * pred_x0 + pred_dir
+        return x_next, pred_x0
+    
+    @torch.no_grad()
+    def invert(
+        self,
+        image: torch.Tensor,
+        num_inference_steps=50,
+        guidance_scale=7.5,
+        eta=0.0,
+        return_intermediates=False,
+        **kwds):
+        """
+        invert a real image into noise map with determinisc DDIM inversion
+        """
+        DEVICE = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
+        batch_size = image.shape[0]
+       
+        # if isinstance(prompt, list):
+        #     if batch_size == 1:
+        #         image = image.expand(len(prompt), -1, -1, -1)
+        # elif isinstance(prompt, str):
+        #     if batch_size > 1:
+        #         prompt = [prompt] * batch_size
+
+        # text embeddings
+        # text_input = self.tokenizer(
+        #     prompt,
+        #     padding="max_length",
+        #     max_length=77,
+        #     return_tensors="pt"
+        # )
+        # text_embeddings = self.text_encoder(text_input.input_ids.to(DEVICE))[0]
+        # print("input text embeddings :", text_embeddings.shape)
+        # define initial latents
+        latents = self.image2latent(image)
+        start_latents = latents
+        # print(latents)
+        # exit()
+        # unconditional embedding for classifier free guidance
+        # if guidance_scale > 1.:
+        #     max_length = text_input.input_ids.shape[-1]
+        #     unconditional_input = self.tokenizer(
+        #         [""] * batch_size,
+        #         padding="max_length",
+        #         max_length=77,
+        #         return_tensors="pt"
+        #     )
+        #     unconditional_embeddings = self.text_encoder(unconditional_input.input_ids.to(DEVICE))[0]
+        #     text_embeddings = torch.cat([unconditional_embeddings, text_embeddings], dim=0)
+
+        print("latents shape: ", latents.shape)
+        # torch.Size([1, 4, 64, 64])
+        
+        # interative sampling
+        self.noise_scheduler.set_timesteps(self.args.num_inference_steps, device=self.device)
+        print("Valid timesteps: ", reversed(self.noise_scheduler.timesteps))
+        # print("attributes: ", self.scheduler.__dict__)
+        latents_list = [latents]
+        pred_x0_list = [latents]
+        for i, t in enumerate(tqdm(reversed(self.noise_scheduler.timesteps), desc="DDIM Inversion")):
+            if guidance_scale > 1.:
+                model_inputs = torch.cat([latents] * 2)
+            else:
+                model_inputs = latents
+
+            # predict the noise
+            noise_pred = self.unet(model_inputs, t).sample
+            if guidance_scale > 1.:
+                noise_pred_uncon, noise_pred_con = noise_pred.chunk(2, dim=0)
+                noise_pred = noise_pred_uncon + guidance_scale * (noise_pred_con - noise_pred_uncon)
+            # compute the previous noise sample x_t-1 -> x_t
+            latents, pred_x0 = self.next_step(noise_pred, t, latents)
+            latents_list.append(latents)
+            pred_x0_list.append(pred_x0)
+
+        if return_intermediates:
+            # return the intermediate laters during inversion
+            # pred_x0_list = [self.latent2image(img, return_type="pt") for img in pred_x0_list]
+            return latents, latents_list
+        return latents, start_latents
+    @torch.no_grad()
     def forward_sample_multicontrol(self, inputs, outputs):
         gt_image = inputs['label_imgs']
         # print('gt_image',gt_image.shape)
@@ -766,8 +882,7 @@ class Net(nn.Module):
         # print('===',img_key)
         # ['00008_00.jpg', '00035_00.jpg', '00067_00.jpg']
         densepose = inputs['densepose']
-        # print('densepose',densepose.shape)
-        # correspondence = inputs['correspondence']
+        correspondence = inputs['correspondence']
         # print('!',densepose.shape) torch.Size([1, 20, 1024, 768])
         # print('!!',ref_image.shape) torch.Size([1, 3, 256, 192])
 
@@ -781,7 +896,8 @@ class Net(nn.Module):
         # torch.Size([10, 2, 1024, 768])
         # 1--- torch.Size([3, 3, 224, 224])
         # 2--- torch.Size([3, 2, 1024, 768])
-        # print('!!!',ref_image.shape) torch.Size([10, 3, 224, 224])         
+        # print('!!!',ref_image.shape) torch.Size([10, 3, 224, 224])
+        # torch.Size([1, 3, 512, 384])      
         do_classifier_free_guidance = self.guidance_scale > 1.0
         # print('do_classifier_free_guidance',do_classifier_free_guidance) True
         '''
@@ -805,7 +921,7 @@ class Net(nn.Module):
         # refer_latents = refer_latents.repeat(10,1,1)
         refer_latents = torch.cat([repeat(refer_latents[0, :, :], "c k -> f c k", f=10),
                                    repeat(refer_latents[1, :, :], "c k -> f c k", f=10)])
-        # print('refer_latents',refer_latents.shape)
+        print('refer_latents',refer_latents.shape)
         # torch.Size([20, 235, 768])
         # torch.Size([20, 973, 768])
         if self.args.ref_null_caption: # test must use null caption
@@ -900,10 +1016,19 @@ class Net(nn.Module):
             generator,
             latents=None,
         )
+        # -------                
+        # invert the source image
+        start_code, latents_list = self.unet.invert(ref_image,
+                                                guidance_scale=7.5,
+                                                num_inference_steps=50,
+                                                return_intermediates=True)
+        # start_code = start_code.expand(len(prompts), -1, -1, -1)
         # print('latents',latents.shape)
         # torch.Size([1, 4, 32, 24])
         # torch.Size([1, 4, 64, 48])
-        latents = latents.repeat(1,10,1,1,1)
+        latents = start_code.repeat(1,10,1,1,1)
+        # latents = latents.repeat(1,10,1,1,1)
+
         # print('latents',latents.shape)
         # torch.Size([10, 4, 32, 24])
         # torch.Size([1,10, 4, 64, 48])
@@ -920,6 +1045,7 @@ class Net(nn.Module):
                 print('latent_model_input',latent_model_input.shape) 
                 # torch.Size([20, 4, 32, 24])
                 # torch.Size([20, 4, 64, 48])
+                # torch.Size([2, 10, 4, 64, 48]) 
                 # Add pose to noisy latents
                 _, _, _, h, w = latent_model_input.shape
                 # densepose torch.Size([10, 2, 1024, 768])
@@ -971,6 +1097,18 @@ class Net(nn.Module):
                 '''
 
                 # predict the noise residual
+                # latent_model_input torch.Size([2, 10, 6, 64, 48])
+                # refer_latents  torch.Size([20, 973, 768])
+                
+
+                # inference the synthesized image with MasaCtrl
+                STEP = 4
+                LAYPER = 10
+
+                # hijack the attention module
+                editor = MutualSelfAttentionControl(STEP, LAYPER)
+                regiter_attention_editor_diffusers(model, editor)
+
                 noise_pred = self.unet(
                     latent_model_input,
                     t,
@@ -1000,6 +1138,7 @@ class Net(nn.Module):
         print('gen_img',gen_img.shape)
         # torch.Size([10, 3, 256, 192])
         outputs['logits_imgs'] = gen_img
+        cache = get_local.cache # ->  {'your_attention_function': [attention_map]}
         return outputs
 
 

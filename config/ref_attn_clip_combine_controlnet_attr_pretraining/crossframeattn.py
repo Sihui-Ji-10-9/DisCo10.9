@@ -16,11 +16,12 @@ from annotator.openpose import OpenposeDetector
 import decord
 import math
 from config.ref_attn_clip_combine_controlnet_attr_pretraining.utils import get_query_value,PosEmbedding
-
+from Visualizer.visualizer import get_local
 class CrossFrameAttnProcessor:
     def __init__(self, unet_chunk_size=2):
         self.unet_chunk_size = unet_chunk_size
         # print('-----~!!') yes
+    @get_local('attention_probs')
     def __call__(
             self,
             attn,
@@ -99,7 +100,7 @@ class CrossFrameAttnProcessor:
                 #         indexs=[m-2]
                 #     else:
                 #         indexs=[i-1, i+1]
-                indexs=[0]
+                indexs=[5]
 
                 xy_l = []
                 xy_r = []

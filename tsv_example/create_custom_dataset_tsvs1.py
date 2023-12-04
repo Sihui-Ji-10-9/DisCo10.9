@@ -73,10 +73,10 @@ def load_npy_paths(image_folder):
 def main(args):
     split = args.split 
     
-    image_path_list = load_image_paths(os.path.join(args.root_folder,'image'))
-    cloth_path_list = load_image_paths(os.path.join(args.root_folder,'cloth'))
-    image_mask_path_list = load_image_paths(os.path.join(args.root_folder,'image-parse-v3'))
-    cloth_mask_path_list = load_image_paths(os.path.join(args.root_folder,'cloth-mask'))
+    image_path_list = load_image_paths(os.path.join(args.root_folder,'image3'))
+    cloth_path_list = load_image_paths(os.path.join(args.root_folder,'cloth3'))
+    image_mask_path_list = load_image_paths(os.path.join(args.root_folder,'image-parse-v3-3'))
+    cloth_mask_path_list = load_image_paths(os.path.join(args.root_folder,'cloth-mask3'))
     # smpl_img_path_list = load_image_paths(os.path.join(args.root_folder,'smpl_new'))
     # smpl_pkl_path_list = load_pkl_paths(os.path.join(args.root_folder,'smpl'))
     # densepose_img_path_list = load_image_paths(os.path.join(args.root_folder,'image-densepose'))

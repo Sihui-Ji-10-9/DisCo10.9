@@ -21,6 +21,9 @@ from diffusers.schedulers import DDIMScheduler, PNDMScheduler, DDPMScheduler, Un
 from diffusers.utils import deprecate, PIL_INTERPOLATION
 from diffusers.utils.import_utils import is_xformers_available
 
+from visualizer import get_local
+get_local.activate() # 激活装饰器
+
 # from diffusers.models import UNet2DConditionModel
 from .unet_2d_condition import UNet2DConditionModel
 import PIL.Image
@@ -80,7 +83,8 @@ class Net(nn.Module):
         print(f"Loading pre-trained vae from {args.pretrained_model_path}/vae")
         vae = AutoencoderKL.from_pretrained(
             args.pretrained_model_path, subfolder="vae")
-        decoder_consistency = ConsistencyDecoder(device="cuda:0") # Model size: 2.49 GB
+        if self.args.use_con_dec:
+            decoder_consistency = ConsistencyDecoder(device="cuda:0") # Model size: 2.49 GB
         print(f"Loading pre-trained unet from {self.args.pretrained_model_path}/unet")
         unet = UNet2DConditionModel.from_pretrained(
             self.args.pretrained_model_path, subfolder="unet")
@@ -183,7 +187,8 @@ class Net(nn.Module):
         self.tr_noise_scheduler = tr_noise_scheduler
         self.noise_scheduler = noise_scheduler
         self.vae = vae
-        self.decoder_consistency = decoder_consistency
+        if self.args.use_con_dec:
+            self.decoder_consistency = decoder_consistency
         # self.controlnet = controlnet_unit
         self.unet = unet
         self.feature_extractor = feature_extractor
@@ -320,8 +325,10 @@ class Net(nn.Module):
 
     def image_decoder(self, latents):
         latents = 1/self.scale_factor * latents
-        # dec = self.vae.decode(latents).sample
-        dec = self.decoder_consistency(latents)
+        if self.args.use_con_dec:
+            dec = self.decoder_consistency(latents)
+        else:
+            dec = self.vae.decode(latents).sample
         image = (dec / 2 + 0.5).clamp(0, 1)
         return image
 
@@ -776,7 +783,8 @@ class Net(nn.Module):
         # torch.Size([10, 2, 1024, 768])
         # 1--- torch.Size([3, 3, 224, 224])
         # 2--- torch.Size([3, 2, 1024, 768])
-        # print('!!!',ref_image.shape) torch.Size([10, 3, 224, 224])         
+        # print('!!!',ref_image.shape) #torch.Size([10, 3, 224, 224])  
+        # torch.Size([1, 3, 512, 384])       
         do_classifier_free_guidance = self.guidance_scale > 1.0
         # print('do_classifier_free_guidance',do_classifier_free_guidance) True
         '''
@@ -800,7 +808,7 @@ class Net(nn.Module):
         # refer_latents = refer_latents.repeat(10,1,1)
         refer_latents = torch.cat([repeat(refer_latents[0, :, :], "c k -> f c k", f=10),
                                    repeat(refer_latents[1, :, :], "c k -> f c k", f=10)])
-        # print('refer_latents',refer_latents.shape)
+        print('refer_latents',refer_latents.shape)
         # torch.Size([20, 235, 768])
         # torch.Size([20, 973, 768])
         if self.args.ref_null_caption: # test must use null caption
@@ -967,6 +975,8 @@ class Net(nn.Module):
                 '''
 
                 # predict the noise residual
+                # latent_model_input torch.Size([2, 10, 6, 64, 48])
+                # refer_latents  torch.Size([20, 973, 768])
                 noise_pred = self.unet(
                     latent_model_input,
                     t,
@@ -996,6 +1006,7 @@ class Net(nn.Module):
         print('gen_img',gen_img.shape)
         # torch.Size([10, 3, 256, 192])
         outputs['logits_imgs'] = gen_img
+        cache = get_local.cache # ->  {'your_attention_function': [attention_map]}
         return outputs
 
 
