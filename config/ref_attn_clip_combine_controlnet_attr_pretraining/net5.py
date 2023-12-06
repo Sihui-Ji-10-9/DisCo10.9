@@ -36,6 +36,8 @@ from dinov2.dinov_2 import get_dinov2_model
 from einops import rearrange
 import imageio
 from consistencydecoder import ConsistencyDecoder
+from magicanimate.models.appearance_encoder import AppearanceEncoderModel
+from magicanimate.models.mutual_self_attention import ReferenceAttentionControl
 
 class Net(nn.Module):
     def __init__(
@@ -68,6 +70,7 @@ class Net(nn.Module):
         print(f'Loading DINOv2 image encoder, version {self.args.dinov2_version}')
         # clip_image_encoder = AutoModel.from_pretrained('facebook/dinov2-large')
         clip_image_encoder = AutoModel.from_pretrained('/home/nfs/jsh/DisCo/huggingface/hub/models--facebook--dinov2-large/snapshots/47b73eefe95e8d44ec3623f8890bd894b6ea2d6c')
+
         # clip_image_encoder = AutoModel.from_pretrained('/mnt_group/yuer.qian/pretrain_model/huggingface/dinov2_tryon_19m_20ep_vitl14')
 
         # dinov2_image_encoder = get_dinov2_model(self.args.dinov2_model_path, version=self.args.dinov2_version, pretrained=False)
@@ -88,7 +91,12 @@ class Net(nn.Module):
         print(f"Loading pre-trained unet from {self.args.pretrained_model_path}/unet")
         unet = UNet2DConditionModel.from_pretrained(
             self.args.pretrained_model_path, subfolder="unet")
-
+        tokenizer = CLIPTokenizer.from_pretrained(self.args.sd15_path+ "/tokenizer")
+        self.tokenizer = tokenizer
+        print(f"Loading pre-trained text_encoder from {self.args.sd15_path}/text_encoder")
+        text_encoder = CLIPTextModel.from_pretrained(self.args.sd15_path + "/text_encoder")
+        self.text_encoder = text_encoder
+        appearance_encoder = AppearanceEncoderModel.from_pretrained(self.args.pretrained_appearance_encoder_path, subfolder="appearance_encoder").to(self.device)
         if hasattr(noise_scheduler.config, "steps_offset") and noise_scheduler.config.steps_offset != 1:
             deprecation_message = (
                 f"The configuration file of this scheduler: {noise_scheduler} is outdated. `steps_offset`"
@@ -156,15 +164,12 @@ class Net(nn.Module):
         if self.args.enable_xformers_memory_efficient_attention:
             if is_xformers_available():
                 unet.enable_xformers_memory_efficient_attention()
+                appearance_encoder.enable_xformers_memory_efficient_attention()
             else:
                 print("xformers is not available, therefore not enabled")
         if self.args.use_cf_attn:
             # print('yes') yes
             unet.set_attn_processor(processor=self.text2video_attn_proc)
-
-
-        # WT: initialize controlnet from the pretrained image variation SD model
-        # controlnet_pose = ControlNetModel.from_unet(unet=unet, args=self.args)
         '''
         if args.ref_null_caption:
             tokenizer = CLIPTokenizer.from_pretrained(self.args.sd15_path, subfolder="tokenizer")
@@ -191,6 +196,7 @@ class Net(nn.Module):
             self.decoder_consistency = decoder_consistency
         # self.controlnet = controlnet_unit
         self.unet = unet
+        self.appearance_encoder = appearance_encoder
         self.feature_extractor = feature_extractor
         self.clip_image_encoder = clip_image_encoder
         self.vae_scale_factor = 2 ** (len(self.vae.config.block_out_channels) - 1)
@@ -763,7 +769,10 @@ class Net(nn.Module):
         b, c, h, w = gt_image.size()
         ref_image = inputs['reference_img']
         img_key = inputs['img_key']
-        
+        print('b',b)
+        # 1
+        # print('img_key',img_key)
+        # img_key ['00071_00 copy 2.jpg']
         # for img_name in img_key:
         # print('!!!',ref_image.shape)
         # print('===',img_key)
@@ -806,18 +815,24 @@ class Net(nn.Module):
         else:
             refer_latents = self.clip_encode_image_global(ref_image, self.args.num_inf_images_per_prompt, do_classifier_free_guidance)
         # refer_latents = refer_latents.repeat(10,1,1)
+        # print('refer_latents',refer_latents.shape)
+        # torch.Size([2, 973, 768])
         refer_latents = torch.cat([repeat(refer_latents[0, :, :], "c k -> f c k", f=10),
                                    repeat(refer_latents[1, :, :], "c k -> f c k", f=10)])
         print('refer_latents',refer_latents.shape)
-        # torch.Size([20, 235, 768])
         # torch.Size([20, 973, 768])
         if self.args.ref_null_caption: # test must use null caption
-            text = inputs['input_text']
+            text = inputs['img_key']
             text = ["" for i in text]
             text_embeddings = self.text_encode(
                 text, num_images_per_prompt=self.args.num_inf_images_per_prompt,
                 do_classifier_free_guidance=do_classifier_free_guidance,
                 negative_prompt=None)
+        print('text_embeddings',text_embeddings.shape)
+        # torch.Size([2, 77, 768])
+        reference_control_writer = ReferenceAttentionControl(self.appearance_encoder, do_classifier_free_guidance=True, mode='write')
+        reference_control_reader = ReferenceAttentionControl(self.unet, do_classifier_free_guidance=True, mode='read')
+
         if self.args.add_shape:
             shape =torch.tensor([eval(s) for s in inputs['shape']])
             shape =shape[:,None,:].to(memory_format=torch.contiguous_format).float()
@@ -903,8 +918,7 @@ class Net(nn.Module):
             generator,
             latents=None,
         )
-        # print('latents',latents.shape)
-        # torch.Size([1, 4, 32, 24])
+        print('latents',latents.shape)
         # torch.Size([1, 4, 64, 48])
         latents = latents.repeat(1,10,1,1,1)
         # print('latents',latents.shape)
@@ -913,10 +927,26 @@ class Net(nn.Module):
         # Prepare extra step kwargs.
         extra_step_kwargs = self.prepare_extra_step_kwargs(generator)
 
+        # For img2img setting
+        if self.args.num_actual_inference_steps is None:
+            num_actual_inference_steps = self.args.num_inference_steps
+        else:
+            num_actual_inference_steps = self.args.num_actual_inference_steps
+
+        ref_image_latents = self.image_encoder(ref_image).cuda()
+            
         # Denoising loop
         num_warmup_steps = len(timesteps) - self.args.num_inference_steps * self.noise_scheduler.order
         with self.progress_bar(total=self.args.num_inference_steps) as progress_bar:
             for i, t in enumerate(timesteps):
+                if num_actual_inference_steps is not None and i < self.args.num_inference_steps - num_actual_inference_steps:
+                    continue
+                self.appearance_encoder(
+                    ref_image_latents.repeat(2 if do_classifier_free_guidance else 1, 1, 1, 1),
+                    t,
+                    encoder_hidden_states=text_embeddings,
+                    return_dict=False,
+                )
                 # expand the latents if we are doing classifier free guidance
                 latent_model_input = torch.cat([latents] * 2) if do_classifier_free_guidance else latents
                 latent_model_input = self.noise_scheduler.scale_model_input(latent_model_input, t)
@@ -925,7 +955,7 @@ class Net(nn.Module):
                 # torch.Size([20, 4, 64, 48])
                 # torch.Size([2, 10, 4, 64, 48]) 
                 # Add pose to noisy latents
-                _, _, _, h, w = latent_model_input.shape
+                bs, _, _, h, w = latent_model_input.shape
                 # densepose torch.Size([10, 2, 1024, 768])
                 # print('densepose',densepose.shape)
                 # torch.Size([1, 10, 2, 1024, 768])
@@ -973,16 +1003,16 @@ class Net(nn.Module):
                         return_dict=False,
                     )
                 '''
-
+                reference_control_reader.update(reference_control_writer)
                 # predict the noise residual
                 # latent_model_input torch.Size([2, 10, 6, 64, 48])
                 # refer_latents  torch.Size([20, 973, 768])
                 noise_pred = self.unet(
                     latent_model_input,
                     t,
-                    encoder_hidden_states=refer_latents,
+                    encoder_hidden_states=text_embeddings[:bs],
                     meta=inputs).sample.to(dtype=self.dtype)
-
+                reference_control_reader.clear()
                 # perform guidance
                 if do_classifier_free_guidance:
                     noise_pred_uncond, noise_pred_text = noise_pred.chunk(2)
@@ -995,6 +1025,7 @@ class Net(nn.Module):
                 if i == len(timesteps) - 1 or (
                         (i + 1) > num_warmup_steps and (i + 1) % self.noise_scheduler.order == 0):
                     progress_bar.update()
+                reference_control_writer.clear()
 
         # Post-processing
         # print('===',latents.shape)

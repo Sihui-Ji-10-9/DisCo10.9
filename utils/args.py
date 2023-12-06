@@ -143,6 +143,7 @@ class Args(object):
         parser.add_argument('--pretrained_model_path', default='/home/nfs/jsh/DisCo/diffusers/sd-image-variations-diffusers', type=str)
         parser.add_argument('--dinov2_model_path', default='/home/nfs/jsh/DisCo/dinov2', type=str)
         parser.add_argument('--dinov2_version', default='dinov2_vitg14', type=str)
+        parser.add_argument('--pretrained_appearance_encoder_path', default='magicanimate/pretrained_models/MagicAnimate/appearance_encoder', type=str)
 
         # training configs
         parser.add_argument("--num_workers", default=4,  type=int,
@@ -297,6 +298,7 @@ class Args(object):
                             nargs='?', const=True, default=False)
         parser.add_argument('--num_inf_videos_per_prompt', default=1, type=int)
         parser.add_argument('--num_inference_steps', default=50, type=int)
+        parser.add_argument('--num_actual_inference_steps', default=25, type=int)
         parser.add_argument('--guidance_scale', default=3, type=float)
         parser.add_argument('--stepwise_sample_depth',default=-1, type=int)
         parser.add_argument('--interpolation', default=None,  type=str,
