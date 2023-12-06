@@ -500,7 +500,6 @@ class UNet2DConditionModel(ModelMixin, ConfigMixin, UNet2DConditionLoadersMixin)
         down_block_additional_residuals: Optional[Tuple[torch.Tensor]] = None,
         mid_block_additional_residual: Optional[torch.Tensor] = None,
         return_dict: bool = True,
-        is_invert:bool = False,
     ) -> Union[UNet2DConditionOutput, Tuple]:
         r"""
         Args:
@@ -521,11 +520,9 @@ class UNet2DConditionModel(ModelMixin, ConfigMixin, UNet2DConditionLoadersMixin)
         """
         # torch.Size([2, 10, 6, 64, 48])
         # torch.Size([1, 4, 64, 48])
-        if not is_invert:
-            _, m, _, h_lr, w_lr = sample.shape
-            sample = rearrange(sample, 'b m c h w -> (b m) c h w')
-        else:
-            m=1
+        _, m, _, h_lr, w_lr = sample.shape
+        sample = rearrange(sample, 'b m c h w -> (b m) c h w')
+
         # 20 6 64 48
         # By default samples have to be AT least a multiple of the overall upsampling factor.
         # The overall upsampling factor is equal to 2 ** (# num of upsampling layears).
@@ -556,7 +553,7 @@ class UNet2DConditionModel(ModelMixin, ConfigMixin, UNet2DConditionLoadersMixin)
         
         # print('sample.shape',sample.shape)
         # torch.Size([2, 10, 6, 64, 48])
-        reso_lr = 1024,768
+        # reso_lr = 1024,768
         # hidden_states = rearrange(hidden_states, 'b m c h w -> (b m) c h w')
         # prompt_embd = rearrange(prompt_embd, 'b m l c -> (b m) l c')
 
@@ -597,10 +594,9 @@ class UNet2DConditionModel(ModelMixin, ConfigMixin, UNet2DConditionLoadersMixin)
             emb = emb + class_emb
 
         # 2. pre-process
-        if not is_invert:
-            sample = self.conv_in(sample)
-        else:
-            sample = self.base_conv_in(sample)
+        
+        sample = self.conv_in(sample)
+
         # print('==1sample',sample.shape)
         # torch.Size([20, 320, 64, 48])      
         # 3. down
@@ -613,9 +609,6 @@ class UNet2DConditionModel(ModelMixin, ConfigMixin, UNet2DConditionLoadersMixin)
                     encoder_hidden_states=encoder_hidden_states,
                     attention_mask=attention_mask,
                     cross_attention_kwargs=cross_attention_kwargs,
-                    meta=meta,
-                    reso=reso_lr,
-                    m = m,
                 )
             else:
                 # print('==2sample',sample.shape)
@@ -643,9 +636,6 @@ class UNet2DConditionModel(ModelMixin, ConfigMixin, UNet2DConditionLoadersMixin)
                 encoder_hidden_states=encoder_hidden_states,
                 attention_mask=attention_mask,
                 cross_attention_kwargs=cross_attention_kwargs,
-                meta=meta,
-                reso=reso_lr,
-                m = m,
             )
 
         if mid_block_additional_residual is not None:
@@ -672,9 +662,6 @@ class UNet2DConditionModel(ModelMixin, ConfigMixin, UNet2DConditionLoadersMixin)
                     cross_attention_kwargs=cross_attention_kwargs,
                     upsample_size=upsample_size,
                     attention_mask=attention_mask,
-                    meta=meta,
-                    reso=reso_lr,
-                    m = m,
                 )
             else:
                 sample = upsample_block(

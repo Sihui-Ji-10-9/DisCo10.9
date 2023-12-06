@@ -18,8 +18,11 @@ import math
 from config.ref_attn_clip_combine_controlnet_attr_pretraining.utils import get_query_value,PosEmbedding
 from Visualizer.visualizer import get_local
 class CrossFrameAttnProcessor:
-    def __init__(self, unet_chunk_size=2):
+    def __init__(self, unet_chunk_size=2,m=10,reso=(1024, 768)):
         self.unet_chunk_size = unet_chunk_size
+        self.meta = {}
+        self.m = m
+        self.reso = reso
         # print('-----~!!') yes
     @get_local('attention_probs')
     def __call__(
@@ -28,10 +31,6 @@ class CrossFrameAttnProcessor:
             hidden_states,
             encoder_hidden_states=None,
             attention_mask=None,
-            meta=None,
-            m=None,
-            reso=None,
-            inner_dim=None,
         ):
         # None
         # print('attn',attn)
@@ -40,7 +39,9 @@ class CrossFrameAttnProcessor:
         # print('hidden_states.shape',hidden_states.shape)
         # torch.Size([20, 3072, 320])
         # 0.
-        if meta !=None:
+        m = self.m
+        reso = self.reso
+        if self.meta !=None:
             x = hidden_states
             # print('=====m',m)
             # m=10
@@ -59,7 +60,7 @@ class CrossFrameAttnProcessor:
             # outs_k = []
             # outs_m = []
             outs = []
-            pe = PosEmbedding(2, inner_dim//2)
+            # pe = PosEmbedding(2, inner_dim//2)
             # poses = meta['poses']
             # K = meta['K']
             # print('densepose',meta['densepose'].shape)
@@ -68,10 +69,10 @@ class CrossFrameAttnProcessor:
             # imap torch.Size([1, 10, 1, 1024, 768])
             # torch.Size([1, 10, 2, 1024, 768])
             # depths = meta['densepose'][:, :,:,1::2,1::2][:,:,0,:,:]
-            
-            depths = meta['uv'][:,:,0,:,:]
+            # print('meta!!',self.meta.keys())
+            depths = self.meta['uv'][:,:,0,:,:]
             depths = depths.repeat(2,1,1,1)
-            imap = meta['imap'][:,:,0,:,:]
+            imap = self.meta['imap'][:,:,0,:,:]
             imap = imap.repeat(2,1,1,1)
             # print('depths',depths.shape)
             # print('imap',imap.shape)
@@ -80,7 +81,7 @@ class CrossFrameAttnProcessor:
 
             # correspondence = meta['correspondence'][:, :,:,1::2,1::2]
             
-            correspondence = meta['correspondence']
+            correspondence = self.meta['correspondence']
             correspondence = correspondence.repeat(2,1,1,1,1,1)
             # print('correspondence',correspondence.shape)
             # correspondence torch.Size([2, 10, 10, 1024, 768, 2])
@@ -150,7 +151,7 @@ class CrossFrameAttnProcessor:
                     key_value_xy = rearrange(key_value_xy, 'b l h w c->(b h w) l c')
 
                     # 3072 1 1
-                    key_value_pe = pe(key_value_xy)
+                    # key_value_pe = pe(key_value_xy)
                     
                     # torch.Size([1, 320, 64, 48])
                     query = rearrange(query, 'b c h w->(b h w) c')[:, None]
@@ -165,8 +166,8 @@ class CrossFrameAttnProcessor:
                     mask = mask[..., None]
                     # 3072 1 320
                     key_value = key_value*mask
-                    query_pe = pe(torch.zeros(
-                        query.shape[0], 1, 1, device=query.device))
+                    # query_pe = pe(torch.zeros(
+                    #     query.shape[0], 1, 1, device=query.device))
                     # print('+++++++++',query_pe)
                     # 22222222222
                     # query = query + query_pe
@@ -228,7 +229,7 @@ class CrossFrameAttnProcessor:
         is_cross_attention = encoder_hidden_states is not None
         if encoder_hidden_states is None:
             # encoder_hidden_states = hidden_states
-            if meta!=None:
+            if self.meta!=None:
                 encoder_hidden_states = out
             else:
                 encoder_hidden_states = hidden_states
