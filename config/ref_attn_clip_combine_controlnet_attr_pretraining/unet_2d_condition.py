@@ -179,7 +179,7 @@ class UNet2DConditionModel(ModelMixin, ConfigMixin, UNet2DConditionLoadersMixin)
         self.conv_in = nn.Conv2d(
             in_channels, block_out_channels[0], kernel_size=conv_in_kernel, padding=conv_in_padding
         )
-
+        
         # time
         if time_embedding_type == "fourier":
             time_embed_dim = block_out_channels[0] * 2
@@ -500,6 +500,7 @@ class UNet2DConditionModel(ModelMixin, ConfigMixin, UNet2DConditionLoadersMixin)
         down_block_additional_residuals: Optional[Tuple[torch.Tensor]] = None,
         mid_block_additional_residual: Optional[torch.Tensor] = None,
         return_dict: bool = True,
+        is_invert:bool = False,
     ) -> Union[UNet2DConditionOutput, Tuple]:
         r"""
         Args:
@@ -519,8 +520,12 @@ class UNet2DConditionModel(ModelMixin, ConfigMixin, UNet2DConditionLoadersMixin)
             returning a tuple, the first element is the sample tensor.
         """
         # torch.Size([2, 10, 6, 64, 48])
-        _, m, _, h_lr, w_lr = sample.shape
-        sample = rearrange(sample, 'b m c h w -> (b m) c h w')
+        # torch.Size([1, 4, 64, 48])
+        if not is_invert:
+            _, m, _, h_lr, w_lr = sample.shape
+            sample = rearrange(sample, 'b m c h w -> (b m) c h w')
+        else:
+            m=1
         # 20 6 64 48
         # By default samples have to be AT least a multiple of the overall upsampling factor.
         # The overall upsampling factor is equal to 2 ** (# num of upsampling layears).
@@ -552,10 +557,6 @@ class UNet2DConditionModel(ModelMixin, ConfigMixin, UNet2DConditionLoadersMixin)
         # print('sample.shape',sample.shape)
         # torch.Size([2, 10, 6, 64, 48])
         reso_lr = 1024,768
-        cp_mask=torch.ones(m, m, device=sample.device)
-        for i in range(m):
-            cp_mask[i, i]=0
-
         # hidden_states = rearrange(hidden_states, 'b m c h w -> (b m) c h w')
         # prompt_embd = rearrange(prompt_embd, 'b m l c -> (b m) l c')
 
@@ -596,7 +597,10 @@ class UNet2DConditionModel(ModelMixin, ConfigMixin, UNet2DConditionLoadersMixin)
             emb = emb + class_emb
 
         # 2. pre-process
-        sample = self.conv_in(sample)
+        if not is_invert:
+            sample = self.conv_in(sample)
+        else:
+            sample = self.base_conv_in(sample)
         # print('==1sample',sample.shape)
         # torch.Size([20, 320, 64, 48])      
         # 3. down

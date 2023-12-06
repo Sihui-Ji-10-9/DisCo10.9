@@ -501,8 +501,7 @@ class Net(nn.Module):
         bs_embed, seq_len, _ = image_embeddings.shape
         image_embeddings = image_embeddings.repeat(1, num_images_per_prompt, 1)
         image_embeddings = image_embeddings.view(bs_embed * num_images_per_prompt, seq_len, -1)
-        # image_embeddings = torch.cat([image_embeddings*2])
-        
+
         if do_classifier_free_guidance:
             negative_prompt_embeds = torch.zeros_like(image_embeddings)
 
@@ -630,11 +629,6 @@ class Net(nn.Module):
             refer_latents = self.clip_encode_image_local(ref_image).to(dtype=self.dtype)
         else:
             refer_latents = self.clip_encode_image_global(ref_image).to(dtype=self.dtype)
-        start_code, latents_list = self.invert(ref_image,
-                                               refer_latents,
-                                                guidance_scale=7.5,
-                                                num_inference_steps=50,
-                                                return_intermediates=True)
         if self.args.add_shape:
             shape =torch.tensor([eval(s) for s in inputs['shape']])
             shape =shape[:,None,:].to(memory_format=torch.contiguous_format).float()
@@ -808,7 +802,7 @@ class Net(nn.Module):
     def invert(
         self,
         image: torch.Tensor,
-        refer_latents,
+        prompt,
         num_inference_steps=50,
         guidance_scale=7.5,
         eta=0.0,
@@ -817,15 +811,15 @@ class Net(nn.Module):
         """
         invert a real image into noise map with determinisc DDIM inversion
         """
+        DEVICE = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
         batch_size = image.shape[0]
-        '''
+       
         if isinstance(prompt, list):
             if batch_size == 1:
                 image = image.expand(len(prompt), -1, -1, -1)
         elif isinstance(prompt, str):
             if batch_size > 1:
                 prompt = [prompt] * batch_size
-        '''
 
         # text embeddings
         # text_input = self.tokenizer(
@@ -834,7 +828,6 @@ class Net(nn.Module):
         #     max_length=77,
         #     return_tensors="pt"
         # )
-        '''
         text_input = self.tokenizer(
             prompt,
             padding="max_length",
@@ -846,13 +839,11 @@ class Net(nn.Module):
         text_embeddings = self.text_encoder(text_input.input_ids.to(self.device))[0]
         print("input text embeddings :", text_embeddings.shape)
         #  torch.Size([1, 77, 768])
-        '''
         # define initial latents
         latents = self.image2latent(image)
         start_latents = latents
         # print(latents)
         # exit()
-        '''
         # unconditional embedding for classifier free guidance
         if guidance_scale > 1.:
             max_length = text_input.input_ids.shape[-1]
@@ -866,7 +857,6 @@ class Net(nn.Module):
             unconditional_embeddings = self.text_encoder(unconditional_input.input_ids.to(self.device))[0]
             text_embeddings = torch.cat([unconditional_embeddings, text_embeddings], dim=0)
         text_embeddings = text_embeddings.to(dtype = self.dtype)
-        '''
         print("latents shape: ", latents.shape)
         # torch.Size([1, 4, 64, 48])
         
@@ -883,7 +873,7 @@ class Net(nn.Module):
                 model_inputs = latents
 
             # predict the noise
-            noise_pred = self.unet(model_inputs, t,encoder_hidden_states=refer_latents,is_invert=True).sample
+            noise_pred = self.unet(model_inputs, t,encoder_hidden_states=text_embeddings,is_invert=True).sample
             if guidance_scale > 1.:
                 noise_pred_uncon, noise_pred_con = noise_pred.chunk(2, dim=0)
                 noise_pred = noise_pred_uncon + guidance_scale * (noise_pred_con - noise_pred_uncon)
@@ -947,33 +937,16 @@ class Net(nn.Module):
             refer_latents = self.clip_encode_image_local(ref_image, self.args.num_inf_images_per_prompt, do_classifier_free_guidance)
         else:
             refer_latents = self.clip_encode_image_global(ref_image, self.args.num_inf_images_per_prompt, do_classifier_free_guidance)
-        # -------                
-        # invert the source image
-        source_prompt = ""
-        target_prompt = ""
-        prompts = [source_prompt, target_prompt]
-        
-        start_code, latents_list = self.invert(ref_image,
-                                               refer_latents,
-                                                guidance_scale=7.5,
-                                                num_inference_steps=50,
-                                                return_intermediates=True)
-        # start_code = start_code.expand(len(prompts), -1, -1, -1)
-        # start_code torch.Size([2, 4, 64, 64])
-
-        
         # refer_latents = refer_latents.repeat(10,1,1)
-        # print('refer_latents',refer_latents.shape)
-        # torch.Size([2, 973, 768])
-
-        # torch.Size([20, 973, 768])
         refer_latents = torch.cat([repeat(refer_latents[0, :, :], "c k -> f c k", f=10),
                                    repeat(refer_latents[1, :, :], "c k -> f c k", f=10)])
+        print('refer_latents',refer_latents.shape)
         # torch.Size([20, 235, 768])
         # torch.Size([20, 973, 768])
         if self.args.ref_null_caption: # test must use null caption
-            text = inputs['input_text']
-            text = ["" for i in text]
+            # text = inputs['input_text']
+            # text = ["" for i in text]
+            text = [""] * 10
             text_embeddings = self.text_encode(
                 text, num_images_per_prompt=self.args.num_inf_images_per_prompt,
                 do_classifier_free_guidance=do_classifier_free_guidance,
@@ -1063,16 +1036,26 @@ class Net(nn.Module):
             generator,
             latents=None,
         )
-        
+        # -------                
+        # invert the source image
+        source_prompt = ""
+        target_prompt = ""
+        prompts = [source_prompt, target_prompt]
+        start_code, latents_list = self.invert(ref_image,
+                                               source_prompt,
+                                                guidance_scale=7.5,
+                                                num_inference_steps=50,
+                                                return_intermediates=True)
+        # start_code = start_code.expand(len(prompts), -1, -1, -1)
         # print('latents',latents.shape)
         # torch.Size([1, 4, 32, 24])
         # torch.Size([1, 4, 64, 48])
-        latents = torch.cat([start_code,latents])
-        print('latents',latents.shape)
-        # 2 4 64 64 
-        latents = latents.repeat(1,10,1,1,1)
-        
-        
+
+        # start_code torch.Size([2, 4, 64, 64])
+        latents = start_code.repeat(1,10,1,1,1)
+        # latents = latents.repeat(1,10,1,1,1)
+
+        # print('latents',latents.shape)
         # torch.Size([10, 4, 32, 24])
         # torch.Size([1,10, 4, 64, 48])
         # Prepare extra step kwargs.
@@ -1155,7 +1138,7 @@ class Net(nn.Module):
                 noise_pred = self.unet(
                     latent_model_input,
                     t,
-                    encoder_hidden_states=refer_latents,
+                    encoder_hidden_states=text_embeddings,
                     meta=inputs).sample.to(dtype=self.dtype)
 
                 # perform guidance

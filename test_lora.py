@@ -13,7 +13,14 @@
 from huggingface_hub import snapshot_download
 snapshot_download(repo_id="facebook/dinov2-large", cache_dir='huggingface/hub')
 '''
+# from huggingface_hub import snapshot_download
+# snapshot_download(repo_id="facebook/dinov2-large", cache_dir='huggingface/hub')
 
+from huggingface_hub import snapshot_download
+snapshot_download(repo_id='runwayml/stable-diffusion-v1-5', allow_patterns='text_encoder/*', cache_dir='diffusers/sd-image-variations-diffusers')
+
+
+'''
 from torchvision import transforms
 import os
 import torch
@@ -65,3 +72,4 @@ for k in range(3):
         for j in range(300,301):
             print('--',j)
             print(c[k,i,j])
+'''

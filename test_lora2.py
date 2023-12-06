@@ -11,7 +11,9 @@
 # image = pipe(prompt).images[0]  
     
 # image.save("astronaut_rides_horse.png")
-
+from huggingface_hub import snapshot_download
+snapshot_download(repo_id='runwayml/stable-diffusion-v1-5', allow_patterns='tokenizer/*', cache_dir='diffusers/sd-image-variations-diffusers')
+'''
 import torch
 from diffusers import StableDiffusionPipeline
 from consistencydecoder import ConsistencyDecoder, save_image, load_image
@@ -34,3 +36,4 @@ save_image(sample_gan, "gan.png")
 # decode with vae
 sample_consistency = decoder_consistency(latent)
 save_image(sample_consistency, "con.png")
+'''

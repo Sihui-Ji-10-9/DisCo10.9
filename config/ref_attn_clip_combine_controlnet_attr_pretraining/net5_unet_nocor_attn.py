@@ -1,6 +1,6 @@
 import torch
 from utils.dist import synchronize, get_rank
-from .crossframeattn import CrossFrameAttnProcessor
+from .crossframeattn_base import CrossFrameAttnProcessor
 from config import *
 from typing import Callable, List, Optional, Union
 
@@ -501,8 +501,7 @@ class Net(nn.Module):
         bs_embed, seq_len, _ = image_embeddings.shape
         image_embeddings = image_embeddings.repeat(1, num_images_per_prompt, 1)
         image_embeddings = image_embeddings.view(bs_embed * num_images_per_prompt, seq_len, -1)
-        # image_embeddings = torch.cat([image_embeddings*2])
-        
+
         if do_classifier_free_guidance:
             negative_prompt_embeds = torch.zeros_like(image_embeddings)
 
@@ -965,7 +964,6 @@ class Net(nn.Module):
         # refer_latents = refer_latents.repeat(10,1,1)
         # print('refer_latents',refer_latents.shape)
         # torch.Size([2, 973, 768])
-
         # torch.Size([20, 973, 768])
         refer_latents = torch.cat([repeat(refer_latents[0, :, :], "c k -> f c k", f=10),
                                    repeat(refer_latents[1, :, :], "c k -> f c k", f=10)])
@@ -1067,12 +1065,10 @@ class Net(nn.Module):
         # print('latents',latents.shape)
         # torch.Size([1, 4, 32, 24])
         # torch.Size([1, 4, 64, 48])
-        latents = torch.cat([start_code,latents])
-        print('latents',latents.shape)
-        # 2 4 64 64 
-        latents = latents.repeat(1,10,1,1,1)
-        
-        
+        latents = start_code.repeat(1,10,1,1,1)
+        # latents = latents.repeat(1,10,1,1,1)
+
+        # print('latents',latents.shape)
         # torch.Size([10, 4, 32, 24])
         # torch.Size([1,10, 4, 64, 48])
         # Prepare extra step kwargs.
