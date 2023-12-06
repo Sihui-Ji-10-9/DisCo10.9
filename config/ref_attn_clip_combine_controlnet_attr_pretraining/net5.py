@@ -36,8 +36,8 @@ from dinov2.dinov_2 import get_dinov2_model
 from einops import rearrange
 import imageio
 from consistencydecoder import ConsistencyDecoder
-# from magicanimate.models.appearance_encoder import AppearanceEncoderModel
-# from magicanimate.models.mutual_self_attention import ReferenceAttentionControl
+from magicanimate.models.appearance_encoder import AppearanceEncoderModel
+from magicanimate.models.mutual_self_attention import ReferenceAttentionControl
 
 class Net(nn.Module):
     def __init__(
@@ -96,7 +96,7 @@ class Net(nn.Module):
         print(f"Loading pre-trained text_encoder from {self.args.sd15_path}/text_encoder")
         text_encoder = CLIPTextModel.from_pretrained(self.args.sd15_path + "/text_encoder")
         self.text_encoder = text_encoder
-        # appearance_encoder = AppearanceEncoderModel.from_pretrained(self.args.pretrained_appearance_encoder_path, subfolder="appearance_encoder").to(self.device)
+        appearance_encoder = AppearanceEncoderModel.from_pretrained(self.args.pretrained_appearance_encoder_path, subfolder="appearance_encoder")
         if hasattr(noise_scheduler.config, "steps_offset") and noise_scheduler.config.steps_offset != 1:
             deprecation_message = (
                 f"The configuration file of this scheduler: {noise_scheduler} is outdated. `steps_offset`"
@@ -164,7 +164,7 @@ class Net(nn.Module):
         if self.args.enable_xformers_memory_efficient_attention:
             if is_xformers_available():
                 unet.enable_xformers_memory_efficient_attention()
-                # appearance_encoder.enable_xformers_memory_efficient_attention()
+                appearance_encoder.enable_xformers_memory_efficient_attention()
             else:
                 print("xformers is not available, therefore not enabled")
         if self.args.use_cf_attn:
@@ -196,7 +196,7 @@ class Net(nn.Module):
             self.decoder_consistency = decoder_consistency
         # self.controlnet = controlnet_unit
         self.unet = unet
-        # self.appearance_encoder = appearance_encoder
+        self.appearance_encoder = appearance_encoder
         self.feature_extractor = feature_extractor
         self.clip_image_encoder = clip_image_encoder
         self.vae_scale_factor = 2 ** (len(self.vae.config.block_out_channels) - 1)
@@ -829,6 +829,7 @@ class Net(nn.Module):
                 text, num_images_per_prompt=self.args.num_inf_images_per_prompt,
                 do_classifier_free_guidance=do_classifier_free_guidance,
                 negative_prompt=None)
+        text_embeddings_base = text_embeddings
         # print('text_embeddings',text_embeddings.shape)  # torch.Size([2, 77, 768])
         text_embeddings = torch.cat([repeat(text_embeddings[0, :, :], "c k -> f c k", f=10),
                                    repeat(text_embeddings[1, :, :], "c k -> f c k", f=10)])
@@ -836,8 +837,8 @@ class Net(nn.Module):
         # torch.Size([20, 77, 768])
 
         
-        # reference_control_writer = ReferenceAttentionControl(self.appearance_encoder, do_classifier_free_guidance=True, mode='write')
-        # reference_control_reader = ReferenceAttentionControl(self.unet, do_classifier_free_guidance=True, mode='read')
+        reference_control_writer = ReferenceAttentionControl(self.appearance_encoder, do_classifier_free_guidance=True, mode='write')
+        reference_control_reader = ReferenceAttentionControl(self.unet, do_classifier_free_guidance=True, mode='read')
 
         if self.args.add_shape:
             shape =torch.tensor([eval(s) for s in inputs['shape']])
@@ -945,16 +946,16 @@ class Net(nn.Module):
         num_warmup_steps = len(timesteps) - self.args.num_inference_steps * self.noise_scheduler.order
         with self.progress_bar(total=self.args.num_inference_steps) as progress_bar:
             for i, t in enumerate(timesteps):
-                
+                '''
                 if num_actual_inference_steps is not None and i < self.args.num_inference_steps - num_actual_inference_steps:
                     continue
-                
-                # self.appearance_encoder(
-                #     ref_image_latents.repeat(2 if do_classifier_free_guidance else 1, 1, 1, 1),
-                #     t,
-                #     encoder_hidden_states=text_embeddings,
-                #     return_dict=False,
-                # )
+                '''
+                self.appearance_encoder(
+                    ref_image_latents.repeat(2 if do_classifier_free_guidance else 1, 1, 1, 1),
+                    t,
+                    encoder_hidden_states=text_embeddings_base,
+                    return_dict=False,
+                )
                 # expand the latents if we are doing classifier free guidance
                 latent_model_input = torch.cat([latents] * 2) if do_classifier_free_guidance else latents
                 latent_model_input = self.noise_scheduler.scale_model_input(latent_model_input, t)

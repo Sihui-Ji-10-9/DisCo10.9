@@ -20,7 +20,8 @@ from torch.nn import functional as F
 
 from diffusers.configuration_utils import ConfigMixin, register_to_config
 from diffusers.utils import BaseOutput, logging
-from diffusers.models.cross_attention import AttnProcessor
+# from diffusers.models.cross_attention import AttnProcessor
+from diffusers.models.attention_processor import AttnProcessor
 from diffusers.models.embeddings import TimestepEmbedding, Timesteps
 from diffusers.models.modeling_utils import ModelMixin
 from diffusers.models.unet_2d_blocks import (

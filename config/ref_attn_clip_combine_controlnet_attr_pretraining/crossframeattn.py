@@ -233,7 +233,7 @@ class CrossFrameAttnProcessor:
                 encoder_hidden_states = out
             else:
                 encoder_hidden_states = hidden_states
-        elif attn.cross_attention_norm:
+        elif attn.norm_cross:
             encoder_hidden_states = attn.norm_cross(encoder_hidden_states)
         # print('encoder_hidden_states',encoder_hidden_states.shape)
         key = attn.to_k(encoder_hidden_states)
