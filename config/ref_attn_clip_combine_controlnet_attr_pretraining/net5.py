@@ -91,11 +91,12 @@ class Net(nn.Module):
         print(f"Loading pre-trained unet from {self.args.pretrained_model_path}/unet")
         unet = UNet2DConditionModel.from_pretrained(
             self.args.pretrained_model_path, subfolder="unet")
-        tokenizer = CLIPTokenizer.from_pretrained(self.args.sd15_path+ "/tokenizer")
-        self.tokenizer = tokenizer
-        print(f"Loading pre-trained text_encoder from {self.args.sd15_path}/text_encoder")
-        text_encoder = CLIPTextModel.from_pretrained(self.args.sd15_path + "/text_encoder")
-        self.text_encoder = text_encoder
+        if args.ref_null_caption:
+            tokenizer = CLIPTokenizer.from_pretrained(self.args.sd15_path+ "/tokenizer")
+            self.tokenizer = tokenizer
+            print(f"Loading pre-trained text_encoder from {self.args.sd15_path}/text_encoder")
+            text_encoder = CLIPTextModel.from_pretrained(self.args.sd15_path + "/text_encoder")
+            self.text_encoder = text_encoder
         appearance_encoder = AppearanceEncoderModel.from_pretrained(self.args.pretrained_appearance_encoder_path, subfolder="appearance_encoder")
         if hasattr(noise_scheduler.config, "steps_offset") and noise_scheduler.config.steps_offset != 1:
             deprecation_message = (

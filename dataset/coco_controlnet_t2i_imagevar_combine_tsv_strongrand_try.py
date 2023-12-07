@@ -119,6 +119,7 @@ class BaseDataset(TsvCondImgCompositeDataset):
     def get_metadata(self, idx):
         img_idx = self.get_image_index(idx)
         img_key = self.image_keys[img_idx]
+        caption = self.get_cap(img_idx)
         
         
         # (caption_sample, tag, start,
@@ -135,7 +136,7 @@ class BaseDataset(TsvCondImgCompositeDataset):
 
         # preparing outputs
         meta_data = {}
-        # meta_data['caption'] = caption  # raw text data, not tokenized
+        meta_data['caption'] = caption  # raw text data, not tokenized
         meta_data['img_key'] = img_key
         meta_data['pose_img'] = None # setting pose to None
         # if self.args.combine_use_mask:
@@ -189,6 +190,14 @@ class BaseDataset(TsvCondImgCompositeDataset):
         except Exception as e:
             raise ValueError(
                     f"{e}, in get_shape()")
+    def get_cap(self, img_idx):
+        try:
+            # print(img_idx)
+            row = self.get_row_from_tsv(self.cap_tsv, img_idx)
+            return row[-1]
+        except Exception as e:
+            raise ValueError(
+                    f"{e}, in get_cap()")
     def get_smpl(self, img_idx):
         try:
             row = self.get_row_from_tsv(self.smpl_tsv, img_idx)
@@ -290,8 +299,8 @@ class BaseDataset(TsvCondImgCompositeDataset):
             # apply the mask
             reference_img = reference_img * reference_img_mask# foreground
 
-        # caption = raw_data['caption']
-        outputs = {'img_key':img_key, 'label_imgs': img,  'densepose':densepose, 'reference_img': reference_img, 'reference_img_controlnet':reference_img_controlnet, 'reference_img_vae':reference_img_vae}
+        caption = raw_data['caption']
+        outputs = {'img_key':img_key, 'input_text': caption, 'label_imgs': img,  'densepose':densepose, 'reference_img': reference_img, 'reference_img_controlnet':reference_img_controlnet, 'reference_img_vae':reference_img_vae}
         if self.args.combine_use_mask:
             outputs['background_mask'] = (1 - reference_img_mask)
         if skeleton_img is not None:

@@ -85,8 +85,15 @@ class Net(nn.Module):
         print(f"Loading pre-trained unet from {self.args.pretrained_model_path}/unet")
         unet = UNet2DConditionModel.from_pretrained(
             self.args.pretrained_model_path, subfolder="unet")
-        # appearance_encoder = AppearanceEncoderModel.from_pretrained(self.args.pretrained_appearance_encoder_path, subfolder="appearance_encoder")
-        appearance_encoder = AppearanceEncoderModel.from_pretrained(self.args.pretrained_model_path, subfolder="unet")
+        if args.ref_null_caption:
+            tokenizer = CLIPTokenizer.from_pretrained(self.args.sd15_path+ "/tokenizer")
+            self.tokenizer = tokenizer
+            print(f"Loading pre-trained text_encoder from {self.args.sd15_path}/text_encoder")
+            text_encoder = CLIPTextModel.from_pretrained(self.args.sd15_path + "/text_encoder")
+            self.text_encoder = text_encoder
+        appearance_encoder = AppearanceEncoderModel.from_pretrained(self.args.pretrained_appearance_encoder_path, subfolder="appearance_encoder")
+        # appearance_encoder = AppearanceEncoderModel.from_pretrained(self.args.pretrained_model_path, subfolder="unet")
+        # ok!
 
         if hasattr(noise_scheduler.config, "steps_offset") and noise_scheduler.config.steps_offset != 1:
             deprecation_message = (
@@ -652,7 +659,7 @@ class Net(nn.Module):
         self.appearance_encoder(
             ref_image_latents.repeat(1, 1, 1, 1),
             timesteps,
-            encoder_hidden_states=refer_latents,
+            encoder_hidden_states=z_text,
             return_dict=False,
         )
 
@@ -700,7 +707,7 @@ class Net(nn.Module):
         model_pred = self.unet(
             noisy_latents,
             timesteps,
-            encoder_hidden_states=refer_latents # refer latents
+            encoder_hidden_states=z_text # refer latents
         ).sample
         reference_control_reader.clear()
         if loss_target == "x0":
@@ -922,7 +929,7 @@ class Net(nn.Module):
                 self.appearance_encoder(
                     ref_image_latents.repeat(2 if do_classifier_free_guidance else 1, 1, 1, 1),
                     t,
-                    encoder_hidden_states=refer_latents,
+                    encoder_hidden_states=text_embeddings,
                     return_dict=False,
                 )
                 # expand the latents if we are doing classifier free guidance
@@ -973,7 +980,7 @@ class Net(nn.Module):
                 noise_pred = self.unet(
                     latent_model_input,
                     t,
-                    encoder_hidden_states=refer_latents,
+                    encoder_hidden_states=text_embeddings,
                     meta=inputs).sample.to(dtype=self.dtype)
                 reference_control_reader.clear()
                 # perform guidance
