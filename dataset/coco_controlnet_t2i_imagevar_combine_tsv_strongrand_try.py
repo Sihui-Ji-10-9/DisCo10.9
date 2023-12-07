@@ -144,7 +144,7 @@ class BaseDataset(TsvCondImgCompositeDataset):
         # ref and target image are the same 
         meta_data['ref_img_key'] = img_key
         if self.args.base:
-            meta_data['reference_img'] = img
+            meta_data['reference_img'] = img 
         else:
             meta_data['reference_img'] = self.get_cloth(img_idx)
         if self.args.add_shape:

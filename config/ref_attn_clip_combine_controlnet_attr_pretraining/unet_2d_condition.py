@@ -545,8 +545,9 @@ class UNet2DConditionModel(ModelMixin, ConfigMixin, UNet2DConditionLoadersMixin)
         """
         # torch.Size([2, 10, 6, 64, 48])
         # torch.Size([1, 4, 64, 48])
-        _, m, _, h_lr, w_lr = sample.shape
-        sample = rearrange(sample, 'b m c h w -> (b m) c h w')
+        if sample.shape[1]==10:
+        # _, m, _, h_lr, w_lr = sample.shape
+            sample = rearrange(sample, 'b m c h w -> (b m) c h w')
 
         # 20 6 64 48
         # By default samples have to be AT least a multiple of the overall upsampling factor.

@@ -30,6 +30,12 @@ from utils.common import ensure_directory
 from utils.dist import synchronize
 from dinov2.dinov_2 import get_dinov2_model
 
+from einops import rearrange
+import imageio
+from consistencydecoder import ConsistencyDecoder
+from magicanimate.models.appearance_encoder import AppearanceEncoderModel
+from magicanimate.models.mutual_self_attention import ReferenceAttentionControl
+
 class Net(nn.Module):
     def __init__(
         self, args
@@ -79,6 +85,8 @@ class Net(nn.Module):
         print(f"Loading pre-trained unet from {self.args.pretrained_model_path}/unet")
         unet = UNet2DConditionModel.from_pretrained(
             self.args.pretrained_model_path, subfolder="unet")
+        # appearance_encoder = AppearanceEncoderModel.from_pretrained(self.args.pretrained_appearance_encoder_path, subfolder="appearance_encoder")
+        appearance_encoder = AppearanceEncoderModel.from_pretrained(self.args.pretrained_model_path, subfolder="unet")
 
         if hasattr(noise_scheduler.config, "steps_offset") and noise_scheduler.config.steps_offset != 1:
             deprecation_message = (
@@ -146,6 +154,7 @@ class Net(nn.Module):
         if self.args.enable_xformers_memory_efficient_attention:
             if is_xformers_available():
                 unet.enable_xformers_memory_efficient_attention()
+                appearance_encoder.enable_xformers_memory_efficient_attention()
             else:
                 print("xformers is not available, therefore not enabled")
 
@@ -176,6 +185,7 @@ class Net(nn.Module):
         self.vae = vae
         # self.controlnet = controlnet_unit
         self.unet = unet
+        self.appearance_encoder = appearance_encoder
         self.feature_extractor = feature_extractor
         self.clip_image_encoder = clip_image_encoder
         self.vae_scale_factor = 2 ** (len(self.vae.config.block_out_channels) - 1)
@@ -253,6 +263,12 @@ class Net(nn.Module):
                         param.requires_grad_(True)
                         param_unfreeze_num += 1
                     if 'conv_in' in param_name:
+                        param.requires_grad_(True)
+                        param_unfreeze_num += 1
+                for param_name, param in self.appearance_encoder.named_parameters():
+                    if 'transformer_blocks' not in param_name:
+                        param.requires_grad_(False)
+                    else:
                         param.requires_grad_(True)
                         param_unfreeze_num += 1
 
@@ -603,6 +619,8 @@ class Net(nn.Module):
             refer_latents = self.clip_encode_image_local(ref_image).to(dtype=self.dtype)
         else:
             refer_latents = self.clip_encode_image_global(ref_image).to(dtype=self.dtype)
+        reference_control_writer = ReferenceAttentionControl(self.appearance_encoder, do_classifier_free_guidance=True, mode='write')
+        reference_control_reader = ReferenceAttentionControl(self.unet, do_classifier_free_guidance=True, mode='read')
         if self.args.add_shape:
             shape =torch.tensor([eval(s) for s in inputs['shape']])
             shape =shape[:,None,:].to(memory_format=torch.contiguous_format).float()
@@ -630,7 +648,13 @@ class Net(nn.Module):
             print(f"rank {get_rank()}: noise 0 mean {torch.sum(noise[0])}, noise 1 mean {torch.sum(noise[1])}")
             print(f"timestep 0 {timesteps[0]}, timestep 1 {timesteps[1]}")
         noisy_latents = self.tr_noise_scheduler.add_noise(latents, noise, timesteps)
-
+        ref_image_latents = self.image_encoder(ref_image).cuda()
+        self.appearance_encoder(
+            ref_image_latents.repeat(1, 1, 1, 1),
+            timesteps,
+            encoder_hidden_states=refer_latents,
+            return_dict=False,
+        )
 
         # TODO: @tan, change cond_imgs in dataloadser to pose or other conditions.
         # controlnet_image = inputs["cond_imgs"].to(dtype=self.dtype)
@@ -670,15 +694,15 @@ class Net(nn.Module):
                 noisy_latents, timesteps, refer_latents, # both controlnet path use the refer latents
                 controlnet_cond=controlnet_image, return_dict=False)
         '''
+        
+        reference_control_reader.update(reference_control_writer)
         # Predict the noise residual
-        # torch.Size([64, 4, 32, 32])
-
         model_pred = self.unet(
             noisy_latents,
             timesteps,
             encoder_hidden_states=refer_latents # refer latents
         ).sample
-
+        reference_control_reader.clear()
         if loss_target == "x0":
             target = latents
             x0_pred = self.tr_noise_scheduler.remove_noise(noisy_latents, model_pred, timesteps)
@@ -693,6 +717,7 @@ class Net(nn.Module):
             loss = F.mse_loss(model_pred.float(), target.float(), reduction="mean")
 
         outputs['loss_total'] = loss
+        reference_control_writer.clear()
         return outputs
 
 
@@ -787,6 +812,8 @@ class Net(nn.Module):
                 text, num_images_per_prompt=self.args.num_inf_images_per_prompt,
                 do_classifier_free_guidance=do_classifier_free_guidance,
                 negative_prompt=None)
+        reference_control_writer = ReferenceAttentionControl(self.appearance_encoder, do_classifier_free_guidance=True, mode='write')
+        reference_control_reader = ReferenceAttentionControl(self.unet, do_classifier_free_guidance=True, mode='read')
         if self.args.add_shape:
             shape =torch.tensor([eval(s) for s in inputs['shape']])
             shape =shape[:,None,:].to(memory_format=torch.contiguous_format).float()
@@ -876,10 +903,28 @@ class Net(nn.Module):
         # Prepare extra step kwargs.
         extra_step_kwargs = self.prepare_extra_step_kwargs(generator)
 
+        # For img2img setting
+        if self.args.num_actual_inference_steps is None:
+            num_actual_inference_steps = self.args.num_inference_steps
+        else:
+            num_actual_inference_steps = self.args.num_actual_inference_steps
+
+        ref_image_latents = self.image_encoder(ref_image).cuda()
+            
         # Denoising loop
         num_warmup_steps = len(timesteps) - self.args.num_inference_steps * self.noise_scheduler.order
         with self.progress_bar(total=self.args.num_inference_steps) as progress_bar:
             for i, t in enumerate(timesteps):
+                '''
+                if num_actual_inference_steps is not None and i < self.args.num_inference_steps - num_actual_inference_steps:
+                    continue
+                '''
+                self.appearance_encoder(
+                    ref_image_latents.repeat(2 if do_classifier_free_guidance else 1, 1, 1, 1),
+                    t,
+                    encoder_hidden_states=refer_latents,
+                    return_dict=False,
+                )
                 # expand the latents if we are doing classifier free guidance
                 latent_model_input = torch.cat([latents] * 2) if do_classifier_free_guidance else latents
                 latent_model_input = self.noise_scheduler.scale_model_input(latent_model_input, t)
@@ -924,13 +969,13 @@ class Net(nn.Module):
                 '''
 
                 # predict the noise residual
+                reference_control_reader.update(reference_control_writer)
                 noise_pred = self.unet(
                     latent_model_input,
                     t,
                     encoder_hidden_states=refer_latents,
-                    meta=inputs,
-                    ).sample.to(dtype=self.dtype)
-
+                    meta=inputs).sample.to(dtype=self.dtype)
+                reference_control_reader.clear()
                 # perform guidance
                 if do_classifier_free_guidance:
                     noise_pred_uncond, noise_pred_text = noise_pred.chunk(2)
@@ -938,10 +983,12 @@ class Net(nn.Module):
 
                 # compute the previous noisy sample x_t -> x_t-1
                 latents = self.noise_scheduler.step(noise_pred, t, latents, **extra_step_kwargs).prev_sample
-
+                # print('==after',latents.shape)
+                # torch.Size([10, 4, 32, 24])
                 if i == len(timesteps) - 1 or (
                         (i + 1) > num_warmup_steps and (i + 1) % self.noise_scheduler.order == 0):
                     progress_bar.update()
+                reference_control_writer.clear()
 
         # Post-processing
         gen_img = self.image_decoder(latents)

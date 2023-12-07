@@ -10,7 +10,7 @@ python finetune_sdm_yaml.py \
 --train_yaml /home/nfs/jsh/HOME/VITON-hd-resized/try3.0/tsv1/val.yaml \
 --val_yaml /home/nfs/jsh/HOME/VITON-hd-resized/try3.0/tsv1/val.yaml \
 --unet_unfreeze_type "all" \
---ref_null_caption False \
---combine_clip_local --combine_use_mask --viton_hd --no_smpl --use_cf_attn --ref_null_caption \
+--ref_null_caption True \
+--combine_clip_local --combine_use_mask --viton_hd --no_smpl --use_cf_attn \
 --stage1_pretrain_path /home/nfs/jsh/DisCo/exp/pretrain_3.0_1_dino_hd/22499.pth/mp_rank_00_model_states.pt \
---eval_save_filename /home/nfs/jsh/DisCo/eval/eval_pt3.0_1_dino_hd_try8.0_fix_fat_vedio4_try19_try
+--eval_save_filename /home/nfs/jsh/DisCo/eval/eval_pt3.0_1_dino_hd_try8.0_fix_fat_vedio4_try19_try2
