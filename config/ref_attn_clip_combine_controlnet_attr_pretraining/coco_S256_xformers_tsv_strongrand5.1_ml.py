@@ -1,7 +1,7 @@
 import torch
 
 from config import *
-from config.ref_attn_clip_combine_controlnet_attr_pretraining.net4_1 import Net, inner_collect_fn
+from config.ref_attn_clip_combine_controlnet_attr_pretraining.net4_1_ml import Net, inner_collect_fn
 
 class Args(BasicArgs):
     task_name, method_name = BasicArgs.parse_config_name(__file__)
@@ -46,8 +46,8 @@ class Args(BasicArgs):
     drop_text = 0 # drop text only activate in args.null_caption, default=1.0
     scale_factor = 0.18215
     # pretrained_model_path = os.path.join(BasicArgs.root_dir, 'diffusers/stable-diffusion-v2-1')
-    pretrained_model_path = os.path.join(BasicArgs.root_dir, 'diffusers/RealisticVision-v2-0')
-    sd15_path = os.path.join(BasicArgs.root_dir, 'diffusers/RealisticVision-v2-0')
+    pretrained_model_path = os.path.join(BasicArgs.root_dir, 'diffusers/sd-image-variations-diffusers')
+    sd15_path = os.path.join(BasicArgs.root_dir, 'diffusers/stable-diffusion-v1-5-2')
     gradient_checkpointing = True
     enable_xformers_memory_efficient_attention = True
     freeze_unet=True

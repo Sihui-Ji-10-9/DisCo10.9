@@ -1,7 +1,7 @@
-TORCH_DISTRIBUTED_DEBUG=DETAIL PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION=python AZFUSE_USE_FUSE=0 QD_USE_LINEIDX_8B=0 NCCL_ASYNC_ERROR_HANDLING=0 python -m torch.distributed.launch --nproc_per_node=4 --master_port=12310 finetune_sdm_yaml.py \
+TORCH_DISTRIBUTED_DEBUG=DETAIL PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION=python AZFUSE_USE_FUSE=0 QD_USE_LINEIDX_8B=0 NCCL_ASYNC_ERROR_HANDLING=0 CUDA_VISIBLE_DEVICES='0,1' python -m torch.distributed.launch --nproc_per_node=2 --master_port=12310 finetune_sdm_yaml.py \
 --cf config/ref_attn_clip_combine_controlnet_attr_pretraining/coco_S256_xformers_tsv_strongrand5.py \
 --do_train --root_dir /home/nfs/jsh/DisCo \
---local_train_batch_size 32 --local_eval_batch_size 32 --log_dir exp/pretrain_5.0_dino_hd \
+--local_train_batch_size 48 --local_eval_batch_size 48 --log_dir exp/pretrain_5.0_dino_hd \
 --epochs 600 --deepspeed --eval_step 500 --save_step 500 --gradient_accumulate_steps 1 \
 --learning_rate 1e-3 --fix_dist_seed --loss_target "noise" \
 --train_yaml /home/nfs/jsh/HOME/VITON-hd-resized/train/tsv/train.yaml \

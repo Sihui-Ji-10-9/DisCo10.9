@@ -2,7 +2,7 @@ import torch
 from utils.dist import synchronize, get_rank
 
 from config import *
-from typing import Callable, List, Optional, Union
+from typing import Callable, List, Optional, Union, Tuple
 
 import inspect
 from typing import Callable, List, Optional, Union
@@ -35,7 +35,8 @@ import imageio
 # from consistencydecoder import ConsistencyDecoder
 from magicanimate.models.appearance_encoder import AppearanceEncoderModel
 from magicanimate.models.mutual_self_attention import ReferenceAttentionControl
-
+from diffusers.configuration_utils import ConfigMixin, register_to_config
+from diffusers.models.modeling_utils import ModelMixin
 class Net(nn.Module):
     def __init__(
         self, args
@@ -212,9 +213,7 @@ class Net(nn.Module):
         if getattr(self.args, 'combine_clip_local', None) and not getattr(self.args, 'refer_clip_proj', None): # not use clip pretrained visual projection (but initialize from it)
             # self.refer_clip_proj = torch.nn.Linear(clip_image_encoder.visual_projection.in_features, clip_image_encoder.visual_projection.out_features, bias=False)
             # self.refer_clip_proj.load_state_dict(clip_image_encoder.visual_projection.state_dict())
-            self.refer_clip_proj = nn.Sequential(
-                                nn.Linear(1024, 768),
-                                nn.LayerNorm(768))
+            self.refer_clip_proj = DINO_ADAPTER(in_channels_lst=(1024, 1024, 1024, 1024),out_channels_lst=(768, 768, 768, 768))
             self.refer_clip_proj.requires_grad_(True)
         if args.add_shape:
             self.cc_projection1 = nn.Linear(10,1000)
@@ -486,29 +485,51 @@ class Net(nn.Module):
             image = self.feature_extractor(images=image, return_tensors="pt").pixel_values
             # print('=========================!') no use
         image = image.to(device=self.device, dtype=dtype)
-        last_hidden_states = self.clip_image_encoder(image).last_hidden_state
-        last_hidden_states_norm = last_hidden_states #self.clip_image_encoder.vision_model.post_layernorm(last_hidden_states)
+        # last_hidden_states = self.clip_image_encoder(image).last_hidden_state
+        # last_hidden_states_norm = last_hidden_states #self.clip_image_encoder.vision_model.post_layernorm(last_hidden_states)
         # print('====',last_hidden_states_norm.shape) === torch.Size([4, 257, 1024]) 
+        hidden_states_lst = self.clip_image_encoder(image, output_hidden_states=True).hidden_states
+        hidden_states_lst_ = [hidden_states_lst[-1-18].to(dtype=self.dtype),
+                        hidden_states_lst[-1-12].to(dtype=self.dtype),
+                        hidden_states_lst[-1-6].to(dtype=self.dtype),
+                        hidden_states_lst[-1].to(dtype=self.dtype),]
         if self.args.refer_clip_proj: # directly use clip pretrained projection layer
             image_embeddings = self.clip_image_encoder.visual_projection(last_hidden_states_norm)
         else:
-            image_embeddings = self.refer_clip_proj(last_hidden_states_norm.to(dtype=self.dtype))
+            # image_embeddings = self.refer_clip_proj(last_hidden_states_norm.to(dtype=self.dtype))
+            image_embeddings = self.refer_clip_proj(hidden_states_lst_)
         # image_embeddings = image_embeddings.unsqueeze(1)
 
         # duplicate image embeddings for each generation per prompt, using mps friendly method
-        bs_embed, seq_len, _ = image_embeddings.shape
-        image_embeddings = image_embeddings.repeat(1, num_images_per_prompt, 1)
-        image_embeddings = image_embeddings.view(bs_embed * num_images_per_prompt, seq_len, -1)
+        if isinstance(image_embeddings, list):#dylee
+            image_embeddings_tmp=[]
+            for emb in image_embeddings:
+                bs_embed, seq_len, _ = emb.shape
+                emb = emb.repeat(1, num_images_per_prompt, 1)
+                emb = emb.view(bs_embed * num_images_per_prompt, seq_len, -1)
+                if do_classifier_free_guidance:
+                    negative_prompt_embeds = torch.zeros_like(emb)
 
-        if do_classifier_free_guidance:
-            negative_prompt_embeds = torch.zeros_like(image_embeddings)
+                    # For classifier free guidance, we need to do two forward passes.
+                    # Here we concatenate the unconditional and text embeddings into a single batch
+                    # to avoid doing two forward passes
+                    emb = torch.cat([negative_prompt_embeds, emb])
+                image_embeddings_tmp.append(emb)
+            image_embeddings = image_embeddings_tmp
+        else:
+            bs_embed, seq_len, _ = image_embeddings.shape
+            image_embeddings = image_embeddings.repeat(1, num_images_per_prompt, 1)
+            image_embeddings = image_embeddings.view(bs_embed * num_images_per_prompt, seq_len, -1)
 
-            # For classifier free guidance, we need to do two forward passes.
-            # Here we concatenate the unconditional and text embeddings into a single batch
-            # to avoid doing two forward passes
-            image_embeddings = torch.cat([negative_prompt_embeds, image_embeddings])
+            if do_classifier_free_guidance:
+                negative_prompt_embeds = torch.zeros_like(image_embeddings)
 
-        return image_embeddings.to(dtype=self.dtype)    
+                # For classifier free guidance, we need to do two forward passes.
+                # Here we concatenate the unconditional and text embeddings into a single batch
+                # to avoid doing two forward passes
+                image_embeddings = torch.cat([negative_prompt_embeds, image_embeddings])
+
+        return image_embeddings #.to(dtype=self.dtype)    
     def decode_latents(self, latents):
         latents = 1 / 0.18215 * latents
         image = self.vae.decode(latents).sample
@@ -616,11 +637,14 @@ class Net(nn.Module):
             text = inputs['input_text']
             if random.random() < self.args.drop_text: # drop text w.r.t the prob
                 text = ["" for i in text]
+            text_zero = ["" for i in text]
             z_text = self.text_encode(text)
+            z_text_zero = self.text_encode(text_zero)
+
 
         # text SD input --> reference image input (clip global embedding)
         if self.args.combine_clip_local:
-            refer_latents = self.clip_encode_image_local(ref_image).to(dtype=self.dtype)
+            refer_latents = self.clip_encode_image_local(ref_image)#.to(dtype=self.dtype)
         else:
             refer_latents = self.clip_encode_image_global(ref_image).to(dtype=self.dtype)
         reference_control_writer = ReferenceAttentionControl(self.appearance_encoder, do_classifier_free_guidance=True, mode='write')
@@ -656,7 +680,7 @@ class Net(nn.Module):
         self.appearance_encoder(
             ref_image_latents.repeat(1, 1, 1, 1),
             timesteps,
-            encoder_hidden_states=z_text,
+            encoder_hidden_states=refer_latents,
             return_dict=False,
         )
 
@@ -704,7 +728,7 @@ class Net(nn.Module):
         model_pred = self.unet(
             noisy_latents,
             timesteps,
-            encoder_hidden_states=z_text # refer latents
+            encoder_hidden_states=refer_latents # refer latents
         ).sample
         reference_control_reader.clear()
         if loss_target == "x0":
@@ -977,8 +1001,8 @@ class Net(nn.Module):
                 noise_pred = self.unet(
                     latent_model_input,
                     t,
-                    encoder_hidden_states=text_embeddings,
-                    meta=inputs).sample.to(dtype=self.dtype)
+                    encoder_hidden_states=refer_latents,
+                    ).sample.to(dtype=self.dtype)
                 reference_control_reader.clear()
                 # perform guidance
                 if do_classifier_free_guidance:
@@ -1136,3 +1160,30 @@ def tensor2pil(images):
         pil_images = [Image.fromarray(image) for image in images]
 
     return pil_images
+class DINO_ADAPTER(ModelMixin, ConfigMixin):
+    #调整通道
+    _supports_gradient_checkpointing = True #False
+
+    @register_to_config
+    def __init__(
+        self,
+        in_channels_lst: Tuple[int] = (1024, 1024, 1024, 1024),
+        out_channels_lst: Tuple[int] = (128, 256, 512, 512),
+    ):
+        super().__init__()
+        self.in_channels_lst = in_channels_lst
+        self.out_channels_lst = out_channels_lst
+        self.adapter_blocks = nn.ModuleList([])
+        for in_ch, out_ch in zip(in_channels_lst, out_channels_lst):
+            self.adapter_blocks.append(nn.Sequential(nn.Linear(in_ch, out_ch),nn.LayerNorm(out_ch)))
+
+    def forward(self, dino_outputs):
+        if isinstance(dino_outputs, list):
+            pass
+        else:
+            dino_outputs = [dino_outputs] * len(self.in_channels_lst)
+        adapter_states = []
+        for idx, dino_output in enumerate(dino_outputs):
+            adapter_states.append(self.adapter_blocks[idx](dino_output))
+        
+        return adapter_states

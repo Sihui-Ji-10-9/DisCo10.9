@@ -516,7 +516,8 @@ class UNet2DConditionModel(ModelMixin, ConfigMixin, UNet2DConditionLoadersMixin)
         self,
         sample: torch.FloatTensor,
         timestep: Union[torch.Tensor, float, int],
-        encoder_hidden_states: Union[torch.Tensor, Tuple[torch.Tensor]], #torch.Tensor,  #dylee
+        encoder_hidden_states: torch.Tensor,
+        meta:Optional[Dict[str, Any]] = None,
         class_labels: Optional[torch.Tensor] = None,
         timestep_cond: Optional[torch.Tensor] = None,
         attention_mask: Optional[torch.Tensor] = None,
@@ -626,24 +627,15 @@ class UNet2DConditionModel(ModelMixin, ConfigMixin, UNet2DConditionLoadersMixin)
         # torch.Size([20, 320, 64, 48])      
         # 3. down
         down_block_res_samples = (sample,)
-        for i, downsample_block in enumerate(self.down_blocks):
+        for downsample_block in self.down_blocks:
             if hasattr(downsample_block, "has_cross_attention") and downsample_block.has_cross_attention:
-                if isinstance(encoder_hidden_states, list): #dylee
-                    sample, res_samples = downsample_block(
-                        hidden_states=sample,
-                        temb=emb,
-                        encoder_hidden_states=encoder_hidden_states[i],
-                        attention_mask=attention_mask,
-                        cross_attention_kwargs=cross_attention_kwargs,
-                    )
-                else:
-                    sample, res_samples = downsample_block(
-                        hidden_states=sample,
-                        temb=emb,
-                        encoder_hidden_states=encoder_hidden_states,
-                        attention_mask=attention_mask,
-                        cross_attention_kwargs=cross_attention_kwargs,
-                    )
+                sample, res_samples = downsample_block(
+                    hidden_states=sample,
+                    temb=emb,
+                    encoder_hidden_states=encoder_hidden_states,
+                    attention_mask=attention_mask,
+                    cross_attention_kwargs=cross_attention_kwargs,
+                )
             else:
                 # print('==2sample',sample.shape)
                 # torch.Size([20, 1280, 8, 6])
@@ -664,22 +656,13 @@ class UNet2DConditionModel(ModelMixin, ConfigMixin, UNet2DConditionLoadersMixin)
 
         # 4. mid
         if self.mid_block is not None:
-            if isinstance(encoder_hidden_states, list): #dylee
-                sample = self.mid_block(
-                    sample,
-                    emb,
-                    encoder_hidden_states=encoder_hidden_states[-1],
-                    attention_mask=attention_mask,
-                    cross_attention_kwargs=cross_attention_kwargs,
-                )
-            else:
-                sample = self.mid_block(
-                    sample,
-                    emb,
-                    encoder_hidden_states=encoder_hidden_states,
-                    attention_mask=attention_mask,
-                    cross_attention_kwargs=cross_attention_kwargs,
-                )
+            sample = self.mid_block(
+                sample,
+                emb,
+                encoder_hidden_states=encoder_hidden_states,
+                attention_mask=attention_mask,
+                cross_attention_kwargs=cross_attention_kwargs,
+            )
 
         if mid_block_additional_residual is not None:
             sample = sample + mid_block_additional_residual
@@ -697,26 +680,15 @@ class UNet2DConditionModel(ModelMixin, ConfigMixin, UNet2DConditionLoadersMixin)
                 upsample_size = down_block_res_samples[-1].shape[2:]
 
             if hasattr(upsample_block, "has_cross_attention") and upsample_block.has_cross_attention:
-                if isinstance(encoder_hidden_states, list): #dylee
-                        sample = upsample_block(
-                        hidden_states=sample,
-                        temb=emb,
-                        res_hidden_states_tuple=res_samples,
-                        encoder_hidden_states=encoder_hidden_states[-i],    #dylee:第一个upsample_block无attn，而encoder_hidden_states[-1]对应mid block
-                        cross_attention_kwargs=cross_attention_kwargs,
-                        upsample_size=upsample_size,
-                        attention_mask=attention_mask,
-                    )
-                else:
-                    sample = upsample_block(
-                        hidden_states=sample,
-                        temb=emb,
-                        res_hidden_states_tuple=res_samples,
-                        encoder_hidden_states=encoder_hidden_states,
-                        cross_attention_kwargs=cross_attention_kwargs,
-                        upsample_size=upsample_size,
-                        attention_mask=attention_mask,
-                    )
+                sample = upsample_block(
+                    hidden_states=sample,
+                    temb=emb,
+                    res_hidden_states_tuple=res_samples,
+                    encoder_hidden_states=encoder_hidden_states,
+                    cross_attention_kwargs=cross_attention_kwargs,
+                    upsample_size=upsample_size,
+                    attention_mask=attention_mask,
+                )
             else:
                 sample = upsample_block(
                     hidden_states=sample, temb=emb, res_hidden_states_tuple=res_samples, upsample_size=upsample_size

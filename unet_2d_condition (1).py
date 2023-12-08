@@ -21,8 +21,7 @@ import torch.utils.checkpoint
 from diffusers.configuration_utils import ConfigMixin, register_to_config
 from diffusers.loaders import UNet2DConditionLoadersMixin
 from diffusers.utils import BaseOutput, logging
-# from diffusers.models.cross_attention import AttnProcessor
-from diffusers.models.attention_processor import AttnProcessor
+from diffusers.models.cross_attention import AttnProcessor
 from diffusers.models.embeddings import GaussianFourierProjection, TimestepEmbedding, Timesteps
 from diffusers.models.modeling_utils import ModelMixin
 from diffusers.models.unet_2d_blocks import (
@@ -36,7 +35,7 @@ from diffusers.models.unet_2d_blocks import (
     get_up_block,
 )
 
-from einops import rearrange
+
 logger = logging.get_logger(__name__)  # pylint: disable=invalid-name
 
 
@@ -137,7 +136,6 @@ class UNet2DConditionModel(ModelMixin, ConfigMixin, UNet2DConditionLoadersMixin)
         norm_eps: float = 1e-5,
         cross_attention_dim: int = 1280,
         attention_head_dim: Union[int, Tuple[int]] = 8,
-        num_attention_heads: Optional[Union[int, Tuple[int]]] = None,
         dual_cross_attention: bool = False,
         use_linear_projection: bool = False,
         class_embed_type: Optional[str] = None,
@@ -155,19 +153,6 @@ class UNet2DConditionModel(ModelMixin, ConfigMixin, UNet2DConditionLoadersMixin)
 
         self.sample_size = sample_size
 
-        if num_attention_heads is not None:
-            raise ValueError(
-                "At the moment it is not possible to define the number of attention heads via `num_attention_heads` because of a naming issue as described in https://github.com/huggingface/diffusers/issues/2011#issuecomment-1547958131. Passing `num_attention_heads` will only be supported in diffusers v0.19."
-            )
-
-        # If `num_attention_heads` is not defined (which is the case for most models)
-        # it will default to `attention_head_dim`. This looks weird upon first reading it and it is.
-        # The reason for this behavior is to correct for incorrectly named variables that were introduced
-        # when this library was created. The incorrect naming was only discovered much later in https://github.com/huggingface/diffusers/issues/2011#issuecomment-1547958131
-        # Changing `attention_head_dim` to `num_attention_heads` for 40,000+ configurations is too backwards breaking
-        # which is why we correct for the naming here.
-        num_attention_heads = num_attention_heads or attention_head_dim
-
         # Check inputs
         if len(down_block_types) != len(up_block_types):
             raise ValueError(
@@ -184,11 +169,6 @@ class UNet2DConditionModel(ModelMixin, ConfigMixin, UNet2DConditionLoadersMixin)
                 f"Must provide the same number of `only_cross_attention` as `down_block_types`. `only_cross_attention`: {only_cross_attention}. `down_block_types`: {down_block_types}."
             )
 
-        if not isinstance(num_attention_heads, int) and len(num_attention_heads) != len(down_block_types):
-            raise ValueError(
-                f"Must provide the same number of `num_attention_heads` as `down_block_types`. `num_attention_heads`: {num_attention_heads}. `down_block_types`: {down_block_types}."
-            )
-        
         if not isinstance(attention_head_dim, int) and len(attention_head_dim) != len(down_block_types):
             raise ValueError(
                 f"Must provide the same number of `attention_head_dim` as `down_block_types`. `attention_head_dim`: {attention_head_dim}. `down_block_types`: {down_block_types}."
@@ -199,7 +179,7 @@ class UNet2DConditionModel(ModelMixin, ConfigMixin, UNet2DConditionLoadersMixin)
         self.conv_in = nn.Conv2d(
             in_channels, block_out_channels[0], kernel_size=conv_in_kernel, padding=conv_in_padding
         )
-        
+
         # time
         if time_embedding_type == "fourier":
             time_embed_dim = block_out_channels[0] * 2
@@ -256,9 +236,6 @@ class UNet2DConditionModel(ModelMixin, ConfigMixin, UNet2DConditionLoadersMixin)
         if isinstance(only_cross_attention, bool):
             only_cross_attention = [only_cross_attention] * len(down_block_types)
 
-        if isinstance(num_attention_heads, int):
-            num_attention_heads = (num_attention_heads,) * len(down_block_types)
-
         if isinstance(attention_head_dim, int):
             attention_head_dim = (attention_head_dim,) * len(down_block_types)
 
@@ -280,14 +257,13 @@ class UNet2DConditionModel(ModelMixin, ConfigMixin, UNet2DConditionLoadersMixin)
                 resnet_act_fn=act_fn,
                 resnet_groups=norm_num_groups,
                 cross_attention_dim=cross_attention_dim,
-                num_attention_heads=num_attention_heads[i],
+                attn_num_head_channels=attention_head_dim[i],
                 downsample_padding=downsample_padding,
                 dual_cross_attention=dual_cross_attention,
                 use_linear_projection=use_linear_projection,
                 only_cross_attention=only_cross_attention[i],
                 upcast_attention=upcast_attention,
                 resnet_time_scale_shift=resnet_time_scale_shift,
-                attention_head_dim=attention_head_dim[i] if attention_head_dim[i] is not None else output_channel,
             )
             self.down_blocks.append(down_block)
 
@@ -301,7 +277,7 @@ class UNet2DConditionModel(ModelMixin, ConfigMixin, UNet2DConditionLoadersMixin)
                 output_scale_factor=mid_block_scale_factor,
                 resnet_time_scale_shift=resnet_time_scale_shift,
                 cross_attention_dim=cross_attention_dim,
-                num_attention_heads=num_attention_heads[-1],
+                attn_num_head_channels=attention_head_dim[-1],
                 resnet_groups=norm_num_groups,
                 dual_cross_attention=dual_cross_attention,
                 use_linear_projection=use_linear_projection,
@@ -315,7 +291,7 @@ class UNet2DConditionModel(ModelMixin, ConfigMixin, UNet2DConditionLoadersMixin)
                 resnet_act_fn=act_fn,
                 output_scale_factor=mid_block_scale_factor,
                 cross_attention_dim=cross_attention_dim,
-                attention_head_dim=attention_head_dim[-1],
+                attn_num_head_channels=attention_head_dim[-1],
                 resnet_groups=norm_num_groups,
                 resnet_time_scale_shift=resnet_time_scale_shift,
             )
@@ -329,7 +305,7 @@ class UNet2DConditionModel(ModelMixin, ConfigMixin, UNet2DConditionLoadersMixin)
 
         # up
         reversed_block_out_channels = list(reversed(block_out_channels))
-        reversed_num_attention_heads = list(reversed(num_attention_heads))
+        reversed_attention_head_dim = list(reversed(attention_head_dim))
         only_cross_attention = list(reversed(only_cross_attention))
 
         output_channel = reversed_block_out_channels[0]
@@ -359,13 +335,12 @@ class UNet2DConditionModel(ModelMixin, ConfigMixin, UNet2DConditionLoadersMixin)
                 resnet_act_fn=act_fn,
                 resnet_groups=norm_num_groups,
                 cross_attention_dim=cross_attention_dim,
-                num_attention_heads=reversed_num_attention_heads[i],
+                attn_num_head_channels=reversed_attention_head_dim[i],
                 dual_cross_attention=dual_cross_attention,
                 use_linear_projection=use_linear_projection,
                 only_cross_attention=only_cross_attention[i],
                 upcast_attention=upcast_attention,
                 resnet_time_scale_shift=resnet_time_scale_shift,
-                attention_head_dim=attention_head_dim[i] if attention_head_dim[i] is not None else output_channel,
             )
             self.up_blocks.append(up_block)
             prev_output_channel = output_channel
@@ -419,7 +394,7 @@ class UNet2DConditionModel(ModelMixin, ConfigMixin, UNet2DConditionLoadersMixin)
 
         """
         count = len(self.attn_processors.keys())
-        # print('2222222222222')
+
         if isinstance(processor, dict) and len(processor) != count:
             raise ValueError(
                 f"A dict of processors was passed, but the number of processors {len(processor)} does not match the"
@@ -429,18 +404,14 @@ class UNet2DConditionModel(ModelMixin, ConfigMixin, UNet2DConditionLoadersMixin)
         def fn_recursive_attn_processor(name: str, module: torch.nn.Module, processor):
             if hasattr(module, "set_processor"):
                 if not isinstance(processor, dict):
-                    # print('==',module)
                     module.set_processor(processor)
                 else:
-                    # print('!!',module)
                     module.set_processor(processor.pop(f"{name}.processor"))
 
             for sub_name, child in module.named_children():
-                # print('==',sub_name)
                 fn_recursive_attn_processor(f"{name}.{sub_name}", child, processor)
 
         for name, module in self.named_children():
-            # print('==',name)
             fn_recursive_attn_processor(name, module, processor)
 
     def set_attention_slice(self, slice_size):
@@ -511,7 +482,7 @@ class UNet2DConditionModel(ModelMixin, ConfigMixin, UNet2DConditionLoadersMixin)
     def _set_gradient_checkpointing(self, module, value=False):
         if isinstance(module, (CrossAttnDownBlock2D, DownBlock2D, CrossAttnUpBlock2D, UpBlock2D)):
             module.gradient_checkpointing = value
-            
+
     def forward(
         self,
         sample: torch.FloatTensor,
@@ -542,13 +513,6 @@ class UNet2DConditionModel(ModelMixin, ConfigMixin, UNet2DConditionLoadersMixin)
             [`~models.unet_2d_condition.UNet2DConditionOutput`] if `return_dict` is True, otherwise a `tuple`. When
             returning a tuple, the first element is the sample tensor.
         """
-        # torch.Size([2, 10, 6, 64, 48])
-        # torch.Size([1, 4, 64, 48])
-        if sample.shape[1]==10:
-        # _, m, _, h_lr, w_lr = sample.shape
-            sample = rearrange(sample, 'b m c h w -> (b m) c h w')
-
-        # 20 6 64 48
         # By default samples have to be AT least a multiple of the overall upsampling factor.
         # The overall upsampling factor is equal to 2 ** (# num of upsampling layears).
         # However, the upsampling interpolation output size can be forced to fit any upsampling size
@@ -567,20 +531,10 @@ class UNet2DConditionModel(ModelMixin, ConfigMixin, UNet2DConditionLoadersMixin)
         if attention_mask is not None:
             attention_mask = (1 - attention_mask.to(sample.dtype)) * -10000.0
             attention_mask = attention_mask.unsqueeze(1)
-        
+
         # 0. center input if necessary
         if self.config.center_input_sample:
             sample = 2 * sample - 1.0
-
-        # plus
-        # compute correspondence
-        # self.get_correspondence(meta)
-        
-        # print('sample.shape',sample.shape)
-        # torch.Size([2, 10, 6, 64, 48])
-        # reso_lr = 1024,768
-        # hidden_states = rearrange(hidden_states, 'b m c h w -> (b m) c h w')
-        # prompt_embd = rearrange(prompt_embd, 'b m l c -> (b m) l c')
 
         # 1. time
         timesteps = timestep
@@ -619,11 +573,8 @@ class UNet2DConditionModel(ModelMixin, ConfigMixin, UNet2DConditionLoadersMixin)
             emb = emb + class_emb
 
         # 2. pre-process
-        
         sample = self.conv_in(sample)
 
-        # print('==1sample',sample.shape)
-        # torch.Size([20, 320, 64, 48])      
         # 3. down
         down_block_res_samples = (sample,)
         for i, downsample_block in enumerate(self.down_blocks):
@@ -645,8 +596,6 @@ class UNet2DConditionModel(ModelMixin, ConfigMixin, UNet2DConditionLoadersMixin)
                         cross_attention_kwargs=cross_attention_kwargs,
                     )
             else:
-                # print('==2sample',sample.shape)
-                # torch.Size([20, 1280, 8, 6])
                 sample, res_samples = downsample_block(hidden_states=sample, temb=emb)
 
             down_block_res_samples += res_samples
