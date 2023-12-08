@@ -28,11 +28,11 @@ from .controlnet import ControlNetModel, MultiControlNetModel_MultiHiddenStates
 # from PIL import Image
 from utils.common import ensure_directory
 from utils.dist import synchronize
-from dinov2.dinov_2 import get_dinov2_model
+# from dinov2.dinov_2 import get_dinov2_model
 
 from einops import rearrange
 import imageio
-from consistencydecoder import ConsistencyDecoder
+# from consistencydecoder import ConsistencyDecoder
 from magicanimate.models.appearance_encoder import AppearanceEncoderModel
 from magicanimate.models.mutual_self_attention import ReferenceAttentionControl
 
@@ -60,13 +60,14 @@ class Net(nn.Module):
         
         print('Loading CLIP image encoder')
         # feature_extractor = CLIPImageProcessor.from_pretrained(args.pretrained_model_path, subfolder="feature_extractor")
-        feature_extractor = AutoImageProcessor.from_pretrained('/home/nfs/jsh/DisCo/huggingface/hub/models--facebook--dinov2-large/snapshots/47b73eefe95e8d44ec3623f8890bd894b6ea2d6c', crop_size={'height': args.img_full_size[0], 'width': args.img_full_size[0]})
+        # feature_extractor = AutoImageProcessor.from_pretrained(args.dinov2_model_path, crop_size={'height': args.img_full_size[0], 'width': args.img_full_size[0]})
+        feature_extractor = AutoImageProcessor.from_pretrained('huggingface/hub/models--facebook--dinov2-large/snapshots/47b73eefe95e8d44ec3623f8890bd894b6ea2d6c', crop_size={'height': args.img_full_size[0], 'width': args.img_full_size[0]})
         print(f"Loading pre-trained image_encoder from {args.pretrained_model_path}/image_encoder")
         # clip_image_encoder = CLIPVisionModelWithProjection.from_pretrained(args.pretrained_model_path, subfolder="image_encoder")
         
         print(f'Loading DINOv2 image encoder, version {self.args.dinov2_version}')
-        # clip_image_encoder = AutoModel.from_pretrained('facebook/dinov2-large')
-        clip_image_encoder = AutoModel.from_pretrained('/home/nfs/jsh/DisCo/huggingface/hub/models--facebook--dinov2-large/snapshots/47b73eefe95e8d44ec3623f8890bd894b6ea2d6c')
+        # clip_image_encoder = AutoModel.from_pretrained(args.dinov2_model_path)
+        clip_image_encoder = AutoModel.from_pretrained('huggingface/hub/models--facebook--dinov2-large/snapshots/47b73eefe95e8d44ec3623f8890bd894b6ea2d6c')
         # clip_image_encoder = AutoModel.from_pretrained('/mnt_group/yuer.qian/pretrain_model/huggingface/dinov2_tryon_19m_20ep_vitl14')
 
         # dinov2_image_encoder = get_dinov2_model(self.args.dinov2_model_path, version=self.args.dinov2_version, pretrained=False)
@@ -81,7 +82,7 @@ class Net(nn.Module):
 
         print(f"Loading pre-trained vae from {args.pretrained_model_path}/vae")
         vae = AutoencoderKL.from_pretrained(
-            args.pretrained_model_path, subfolder="vae")
+            args.pretrained_model_path+"/vae")
         print(f"Loading pre-trained unet from {self.args.pretrained_model_path}/unet")
         unet = UNet2DConditionModel.from_pretrained(
             self.args.pretrained_model_path, subfolder="unet")

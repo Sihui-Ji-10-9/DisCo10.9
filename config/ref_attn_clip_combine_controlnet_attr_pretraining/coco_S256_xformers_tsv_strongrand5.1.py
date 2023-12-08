@@ -46,8 +46,8 @@ class Args(BasicArgs):
     drop_text = 1.0 # drop text only activate in args.null_caption, default=1.0
     scale_factor = 0.18215
     # pretrained_model_path = os.path.join(BasicArgs.root_dir, 'diffusers/stable-diffusion-v2-1')
-    pretrained_model_path = os.path.join(BasicArgs.root_dir, 'diffusers/sd-image-variations-diffusers')
-    sd15_path = os.path.join(BasicArgs.root_dir, 'diffusers/stable-diffusion-v1-5-2')
+    pretrained_model_path = os.path.join(BasicArgs.root_dir, 'diffusers/RealisticVision-v2-0')
+    sd15_path = os.path.join(BasicArgs.root_dir, 'diffusers/RealisticVision-v2-0')
     gradient_checkpointing = True
     enable_xformers_memory_efficient_attention = True
     freeze_unet=True
