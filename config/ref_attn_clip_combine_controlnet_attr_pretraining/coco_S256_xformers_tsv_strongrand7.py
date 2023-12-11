@@ -1,7 +1,7 @@
 import torch
 
 from config import *
-from config.ref_attn_clip_combine_controlnet_attr_pretraining.net5 import Net, inner_collect_fn
+from config.ref_attn_clip_combine_controlnet_attr_pretraining.net5_base import Net, inner_collect_fn
 
 class Args(BasicArgs):
     task_name, method_name = BasicArgs.parse_config_name(__file__)

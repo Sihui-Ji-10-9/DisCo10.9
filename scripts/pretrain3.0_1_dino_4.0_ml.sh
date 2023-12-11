@@ -3,9 +3,10 @@ TORCH_DISTRIBUTED_DEBUG=DETAIL PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION=python AZF
 --do_train --root_dir /home/nfs/jsh/DisCo \
 --local_train_batch_size 40 --local_eval_batch_size 40 --log_dir exp/pretrain_5.1_ml_dino_hd \
 --epochs 600 --deepspeed --eval_step 500 --save_step 500 --gradient_accumulate_steps 1 \
---learning_rate 1e-4 --fix_dist_seed --loss_target "noise" \
+--learning_rate 1e-3 --fix_dist_seed --loss_target "noise" \
 --train_yaml /home/nfs/jsh/HOME/VITON-hd-resized/train/tsv1/train.yaml \
 --val_yaml /home/nfs/jsh/HOME/VITON-hd-resized/try/tsv/val.yaml \
 --unet_unfreeze_type "transblocks"  --ref_null_caption True \
 --combine_clip_local --combine_use_mask --viton_hd --no_smpl \
---conds "masks" --max_eval_samples 2000 --strong_aug_stage1 --node_split_sampler 0 
+--conds "masks" --max_eval_samples 2000 --strong_aug_stage1 --node_split_sampler 0 \
+--resume

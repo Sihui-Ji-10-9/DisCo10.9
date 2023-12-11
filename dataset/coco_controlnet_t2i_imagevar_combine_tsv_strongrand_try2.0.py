@@ -160,7 +160,8 @@ class BaseDataset(TsvCondImgCompositeDataset):
         meta_data['dp'] = self.get_dp(img_key)
         meta_data['uv'] = self.get_uvmap(img_key)
         meta_data['imap'] = self.get_imap(img_key)
-        meta_data['correspondence'] = self.get_cor(img_key)
+        if self.args.use_cf_attn:
+            meta_data['correspondence'] = self.get_cor(img_key)
         # print('img',meta_data['img'])
         # print('dp',meta_data['dp'])
         return meta_data
@@ -362,7 +363,8 @@ class BaseDataset(TsvCondImgCompositeDataset):
         densepose = raw_data['dp']
         imap = raw_data['imap']
         uv = raw_data['uv']
-        correspondence = raw_data['correspondence']
+        if self.args.use_cf_attn:
+            correspondence = raw_data['correspondence']
         # torch.Size([2, 1024, 768])
         # first check the size of the ref image
         ref_img_size = raw_data['reference_img'].size
@@ -403,13 +405,15 @@ class BaseDataset(TsvCondImgCompositeDataset):
             reference_img = reference_img * reference_img_mask# foreground
 
         # caption = raw_data['caption']
-        outputs = {'img_key':img_key, 'label_imgs': img, 'uv':uv,'imap': imap, 'densepose':densepose,'correspondence':correspondence, 'reference_img': reference_img, 'reference_img_controlnet':reference_img_controlnet, 'reference_img_vae':reference_img_vae}
+        outputs = {'img_key':img_key, 'label_imgs': img, 'uv':uv,'imap': imap, 'densepose':densepose, 'reference_img': reference_img, 'reference_img_controlnet':reference_img_controlnet, 'reference_img_vae':reference_img_vae}
         if self.args.combine_use_mask:
             outputs['background_mask'] = (1 - reference_img_mask)
         if skeleton_img is not None:
             outputs.update({'cond_imgs': skeleton_img})
         if self.args.add_shape:
             outputs.update({'shape': shape})
+        if self.args.use_cf_attn:
+            outputs.update({'correspondence': correspondence})
         # print('==densepose',densepose.shape)
         # print('==imap',imap.shape)
         # torch.Size([20, 1024, 768])

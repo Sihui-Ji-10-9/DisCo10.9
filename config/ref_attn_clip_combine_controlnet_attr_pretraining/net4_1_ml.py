@@ -950,7 +950,7 @@ class Net(nn.Module):
                 self.appearance_encoder(
                     ref_image_latents.repeat(2 if do_classifier_free_guidance else 1, 1, 1, 1),
                     t,
-                    encoder_hidden_states=text_embeddings,
+                    encoder_hidden_states=refer_latents,
                     return_dict=False,
                 )
                 # expand the latents if we are doing classifier free guidance

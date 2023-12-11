@@ -974,8 +974,7 @@ class Net(nn.Module):
                 noise_pred = self.unet(
                     latent_model_input,
                     t,
-                    encoder_hidden_states=refer_latents,
-                    meta=inputs).sample.to(dtype=self.dtype)
+                    encoder_hidden_states=refer_latents).sample.to(dtype=self.dtype)
 
                 # perform guidance
                 if do_classifier_free_guidance:
