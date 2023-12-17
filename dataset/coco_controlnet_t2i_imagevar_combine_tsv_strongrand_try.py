@@ -76,6 +76,16 @@ class BaseDataset(TsvCondImgCompositeDataset):
             transforms.Normalize([0.485,0.456,0.406],
                                  [0.229,0.224,0.225]),
         ])
+        self.ref_transform_for_unet2 = transforms.Compose([ # follow CLIP transform
+            transforms.ToTensor(),
+            # transforms.Pad((padding_left, padding_top, padding_right, padding_bottom), padding_mode="edge"),
+            transforms.Resize(self.img_size, interpolation=transforms.InterpolationMode.BICUBIC),
+            # transforms.RandomResizedCrop(
+            #     (224, 224),
+            #     scale=(min_crop_scale, 1.0), ratio=(1., 1.),
+            #     interpolation=transforms.InterpolationMode.BICUBIC),
+            transforms.Normalize([0.5], [0.5]),
+        ])
         self.ref_transform_mask = transforms.Compose([ # follow CLIP transform
             # transforms.RandomResizedCrop(
             #     (224, 224),
@@ -281,8 +291,9 @@ class BaseDataset(TsvCondImgCompositeDataset):
         if getattr(self.args, 'refer_clip_preprocess', None):
             reference_img = self.preprocesser(reference_img).pixel_values[0]  # use clip preprocess
         else:
+            # here!
             reference_img = self.augmentation(reference_img, transform1, self.ref_transform, state)
-
+        reference_img_for_unet2 = self.augmentation(raw_data['reference_img'], transform1, self.ref_transform_for_unet2, state)
         reference_img_vae = reference_img_controlnet
         if self.args.combine_use_mask:
             mask_img_ref = raw_data['mask_img_ref']
@@ -300,7 +311,7 @@ class BaseDataset(TsvCondImgCompositeDataset):
             reference_img = reference_img * reference_img_mask# foreground
 
         caption = raw_data['caption']
-        outputs = {'img_key':img_key, 'input_text': caption, 'label_imgs': img,  'densepose':densepose, 'reference_img': reference_img, 'reference_img_controlnet':reference_img_controlnet, 'reference_img_vae':reference_img_vae}
+        outputs = {'img_key':img_key, 'input_text': caption, 'label_imgs': img,  'densepose':densepose, 'reference_img': reference_img, 'reference_img_for_unet2': reference_img_for_unet2, 'reference_img_controlnet':reference_img_controlnet, 'reference_img_vae':reference_img_vae}
         if self.args.combine_use_mask:
             outputs['background_mask'] = (1 - reference_img_mask)
         if skeleton_img is not None:

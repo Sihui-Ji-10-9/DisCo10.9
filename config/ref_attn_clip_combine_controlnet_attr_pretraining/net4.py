@@ -28,11 +28,11 @@ from .controlnet import ControlNetModel, MultiControlNetModel_MultiHiddenStates
 # from PIL import Image
 from utils.common import ensure_directory
 from utils.dist import synchronize
-from dinov2.dinov_2 import get_dinov2_model
+# from dinov2.dinov_2 import get_dinov2_model
 
 from einops import rearrange
 import imageio
-from consistencydecoder import ConsistencyDecoder
+# from consistencydecoder import ConsistencyDecoder
 from magicanimate.models.appearance_encoder import AppearanceEncoderModel
 from magicanimate.models.mutual_self_attention import ReferenceAttentionControl
 
@@ -60,13 +60,15 @@ class Net(nn.Module):
         
         print('Loading CLIP image encoder')
         # feature_extractor = CLIPImageProcessor.from_pretrained(args.pretrained_model_path, subfolder="feature_extractor")
-        feature_extractor = AutoImageProcessor.from_pretrained('/home/nfs/jsh/DisCo/huggingface/hub/models--facebook--dinov2-large/snapshots/47b73eefe95e8d44ec3623f8890bd894b6ea2d6c', crop_size={'height': args.img_full_size[0], 'width': args.img_full_size[0]})
-        print(f"Loading pre-trained image_encoder from {args.pretrained_model_path}/image_encoder")
+        # feature_extractor = AutoImageProcessor.from_pretrained('/home/nfs/jsh/DisCo/huggingface/hub/models--facebook--dinov2-large/snapshots/47b73eefe95e8d44ec3623f8890bd894b6ea2d6c', crop_size={'height': args.img_full_size[0], 'width': args.img_full_size[0]})
+        feature_extractor = AutoImageProcessor.from_pretrained('huggingface/hub/models--facebook--dinov2-large/snapshots/47b73eefe95e8d44ec3623f8890bd894b6ea2d6c', crop_size={'height': args.img_full_size[0], 'width': args.img_full_size[0]})
+        # print(f"Loading pre-trained image_encoder from {args.pretrained_model_path}/image_encoder")
         # clip_image_encoder = CLIPVisionModelWithProjection.from_pretrained(args.pretrained_model_path, subfolder="image_encoder")
         
         print(f'Loading DINOv2 image encoder, version {self.args.dinov2_version}')
         # clip_image_encoder = AutoModel.from_pretrained('facebook/dinov2-large')
-        clip_image_encoder = AutoModel.from_pretrained('/home/nfs/jsh/DisCo/huggingface/hub/models--facebook--dinov2-large/snapshots/47b73eefe95e8d44ec3623f8890bd894b6ea2d6c')
+        # clip_image_encoder = AutoModel.from_pretrained('/home/nfs/jsh/DisCo/huggingface/hub/models--facebook--dinov2-large/snapshots/47b73eefe95e8d44ec3623f8890bd894b6ea2d6c')
+        clip_image_encoder = AutoModel.from_pretrained('huggingface/hub/models--facebook--dinov2-large/snapshots/47b73eefe95e8d44ec3623f8890bd894b6ea2d6c')
         # clip_image_encoder = AutoModel.from_pretrained('/mnt_group/yuer.qian/pretrain_model/huggingface/dinov2_tryon_19m_20ep_vitl14')
 
         # dinov2_image_encoder = get_dinov2_model(self.args.dinov2_model_path, version=self.args.dinov2_version, pretrained=False)
@@ -79,13 +81,16 @@ class Net(nn.Module):
         # self.dinov2_head = nn.Linear(1536, 768)
         # self.dinov2_head.requires_grad_(True)
 
-        print(f"Loading pre-trained vae from {args.pretrained_model_path}/vae")
-        vae = AutoencoderKL.from_pretrained(
-            args.pretrained_model_path, subfolder="vae")
+        # print(f"Loading pre-trained vae from {args.pretrained_model_path}/vae")
+        print(f"Loading pre-trained vae from /home/nfs/jsh/DisCo/diffusers/sd-vae-ft-mse")
+        # vae = AutoencoderKL.from_pretrained(
+        #     args.pretrained_model_path, subfolder="vae")
+        vae = AutoencoderKL.from_pretrained('/home/nfs/jsh/DisCo/diffusers/sd-vae-ft-mse')
         print(f"Loading pre-trained unet from {self.args.pretrained_model_path}/unet")
         unet = UNet2DConditionModel.from_pretrained(
             self.args.pretrained_model_path, subfolder="unet")
-        appearance_encoder = AppearanceEncoderModel.from_pretrained(self.args.pretrained_appearance_encoder_path, subfolder="appearance_encoder")
+        # appearance_encoder = AppearanceEncoderModel.from_pretrained(self.args.pretrained_appearance_encoder_path, subfolder="appearance_encoder")
+        appearance_encoder = AppearanceEncoderModel.from_pretrained(self.args.pretrained_model_path, subfolder="unet")
 
         if hasattr(noise_scheduler.config, "steps_offset") and noise_scheduler.config.steps_offset != 1:
             deprecation_message = (
@@ -273,6 +278,9 @@ class Net(nn.Module):
 
             elif self.args.unet_unfreeze_type == 'all':
                 for param_name, param in self.unet.named_parameters():
+                    param.requires_grad_(False)
+                    # param_unfreeze_num += 1
+                for param_name, param in self.appearance_encoder.named_parameters():
                     param.requires_grad_(True)
                     param_unfreeze_num += 1
 
@@ -604,6 +612,8 @@ class Net(nn.Module):
         loss_target = self.args.loss_target
         image = inputs['label_imgs']  # (B, C, H, W)
         ref_image = inputs['reference_img']
+        ref_image_for_unet2 = inputs['reference_img_for_unet2']
+
         densepose = inputs['densepose']
         bsz = image.shape[0]
 
@@ -647,7 +657,7 @@ class Net(nn.Module):
             print(f"rank {get_rank()}: noise 0 mean {torch.sum(noise[0])}, noise 1 mean {torch.sum(noise[1])}")
             print(f"timestep 0 {timesteps[0]}, timestep 1 {timesteps[1]}")
         noisy_latents = self.tr_noise_scheduler.add_noise(latents, noise, timesteps)
-        ref_image_latents = self.image_encoder(ref_image).cuda()
+        ref_image_latents = self.image_encoder(ref_image_for_unet2).cuda()
         self.appearance_encoder(
             ref_image_latents.repeat(1, 1, 1, 1),
             timesteps,
@@ -770,6 +780,7 @@ class Net(nn.Module):
         # torch.Size([3, 3, 256, 256])
         b, c, h, w = gt_image.size()
         ref_image = inputs['reference_img']
+        ref_image_for_unet2 = inputs['reference_img_for_unet2']
         img_key = inputs['img_key']
         
         # for img_name in img_key:
@@ -908,7 +919,7 @@ class Net(nn.Module):
         else:
             num_actual_inference_steps = self.args.num_actual_inference_steps
 
-        ref_image_latents = self.image_encoder(ref_image).cuda()
+        ref_image_latents = self.image_encoder(ref_image_for_unet2).cuda()
             
         # Denoising loop
         num_warmup_steps = len(timesteps) - self.args.num_inference_steps * self.noise_scheduler.order

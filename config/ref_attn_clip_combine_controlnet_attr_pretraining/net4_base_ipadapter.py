@@ -28,13 +28,12 @@ from .controlnet import ControlNetModel, MultiControlNetModel_MultiHiddenStates
 # from PIL import Image
 from utils.common import ensure_directory
 from utils.dist import synchronize
-# from dinov2.dinov_2 import get_dinov2_model
-
-from einops import rearrange
-import imageio
-# from consistencydecoder import ConsistencyDecoder
-from magicanimate.models.appearance_encoder import AppearanceEncoderModel
-from magicanimate.models.mutual_self_attention import ReferenceAttentionControl
+from dinov2.dinov_2 import get_dinov2_model
+from IP_Adapter.ip_adapter.utils import is_torch2_available
+if is_torch2_available():
+    from IP_Adapter.ip_adapter.attention_processor import IPAttnProcessor2_0 as IPAttnProcessor, AttnProcessor2_0 as AttnProcessor
+else:
+    from IP_Adapter.ip_adapter.attention_processor import IPAttnProcessor, AttnProcessor
 
 class Net(nn.Module):
     def __init__(
@@ -60,13 +59,14 @@ class Net(nn.Module):
         
         print('Loading CLIP image encoder')
         # feature_extractor = CLIPImageProcessor.from_pretrained(args.pretrained_model_path, subfolder="feature_extractor")
-        # feature_extractor = AutoImageProcessor.from_pretrained(args.dinov2_model_path, crop_size={'height': args.img_full_size[0], 'width': args.img_full_size[0]})
+        # feature_extractor = AutoImageProcessor.from_pretrained('/home/nfs/jsh/DisCo/huggingface/hub/models--facebook--dinov2-large/snapshots/47b73eefe95e8d44ec3623f8890bd894b6ea2d6c', crop_size={'height': args.img_full_size[0], 'width': args.img_full_size[0]})
         feature_extractor = AutoImageProcessor.from_pretrained('huggingface/hub/models--facebook--dinov2-large/snapshots/47b73eefe95e8d44ec3623f8890bd894b6ea2d6c', crop_size={'height': args.img_full_size[0], 'width': args.img_full_size[0]})
-        print(f"Loading pre-trained image_encoder from {args.pretrained_model_path}/image_encoder")
+        # print(f"Loading pre-trained image_encoder from {args.pretrained_model_path}/image_encoder")
         # clip_image_encoder = CLIPVisionModelWithProjection.from_pretrained(args.pretrained_model_path, subfolder="image_encoder")
         
         print(f'Loading DINOv2 image encoder, version {self.args.dinov2_version}')
-        # clip_image_encoder = AutoModel.from_pretrained(args.dinov2_model_path)
+        # clip_image_encoder = AutoModel.from_pretrained('facebook/dinov2-large')
+        # clip_image_encoder = AutoModel.from_pretrained('/home/nfs/jsh/DisCo/huggingface/hub/models--facebook--dinov2-large/snapshots/47b73eefe95e8d44ec3623f8890bd894b6ea2d6c')
         clip_image_encoder = AutoModel.from_pretrained('huggingface/hub/models--facebook--dinov2-large/snapshots/47b73eefe95e8d44ec3623f8890bd894b6ea2d6c')
         # clip_image_encoder = AutoModel.from_pretrained('/mnt_group/yuer.qian/pretrain_model/huggingface/dinov2_tryon_19m_20ep_vitl14')
 
@@ -80,9 +80,11 @@ class Net(nn.Module):
         # self.dinov2_head = nn.Linear(1536, 768)
         # self.dinov2_head.requires_grad_(True)
 
-        print(f"Loading pre-trained vae from {args.pretrained_model_path}/vae")
-        vae = AutoencoderKL.from_pretrained(
-            args.pretrained_model_path+"/vae")
+        # print(f"Loading pre-trained vae from {args.pretrained_model_path}/vae")
+        print(f"Loading pre-trained vae from /home/nfs/jsh/DisCo/diffusers/sd-vae-ft-mse")
+        # vae = AutoencoderKL.from_pretrained(
+        #     args.pretrained_model_path, subfolder="vae")
+        vae = AutoencoderKL.from_pretrained('/home/nfs/jsh/DisCo/diffusers/sd-vae-ft-mse')
         print(f"Loading pre-trained unet from {self.args.pretrained_model_path}/unet")
         unet = UNet2DConditionModel.from_pretrained(
             self.args.pretrained_model_path, subfolder="unet")
@@ -92,9 +94,6 @@ class Net(nn.Module):
             print(f"Loading pre-trained text_encoder from {self.args.sd15_path}/text_encoder")
             text_encoder = CLIPTextModel.from_pretrained(self.args.sd15_path + "/text_encoder")
             self.text_encoder = text_encoder
-        # appearance_encoder = AppearanceEncoderModel.from_pretrained(self.args.pretrained_appearance_encoder_path, subfolder="appearance_encoder")
-        appearance_encoder = AppearanceEncoderModel.from_pretrained(self.args.pretrained_model_path, subfolder="unet")
-        # ok!
 
         if hasattr(noise_scheduler.config, "steps_offset") and noise_scheduler.config.steps_offset != 1:
             deprecation_message = (
@@ -158,14 +157,39 @@ class Net(nn.Module):
             # print('[:, 3:]',unet.conv_in.weight[:, 3:].shape)
             # torch.Size([320, 4, 3, 3])
             unet.conv_in.weight[:, 4:] = torch.zeros(unet.conv_in.weight[:, 4:].shape) # new weights initialized to zero
+        # init adapter modules
+        attn_procs = {}
+        unet_sd = unet.state_dict()
+        for name in unet.attn_processors.keys():
+            cross_attention_dim = None if name.endswith("attn1.processor") else unet.config.cross_attention_dim
+            if name.startswith("mid_block"):
+                hidden_size = unet.config.block_out_channels[-1]
+            elif name.startswith("up_blocks"):
+                block_id = int(name[len("up_blocks.")])
+                hidden_size = list(reversed(unet.config.block_out_channels))[block_id]
+            elif name.startswith("down_blocks"):
+                block_id = int(name[len("down_blocks.")])
+                hidden_size = unet.config.block_out_channels[block_id]
+            if cross_attention_dim is None:
+                attn_procs[name] = AttnProcessor()
+            else:
+                print(name)
+                layer_name = name.split(".processor")[0]
+                weights = {
+                    "to_k_ip.weight": unet_sd[layer_name + ".to_k.weight"],
+                    "to_v_ip.weight": unet_sd[layer_name + ".to_v.weight"],
+                }
+                attn_procs[name] = IPAttnProcessor(hidden_size=hidden_size, cross_attention_dim=cross_attention_dim)
+                attn_procs[name].load_state_dict(weights)
         
         if self.args.enable_xformers_memory_efficient_attention:
             if is_xformers_available():
                 unet.enable_xformers_memory_efficient_attention()
-                appearance_encoder.enable_xformers_memory_efficient_attention()
             else:
                 print("xformers is not available, therefore not enabled")
-
+        unet.set_attn_processor(attn_procs)
+        self.adapter_modules = torch.nn.ModuleList(unet.attn_processors.values())
+        # self.adapter_modules.requires_grad_(True)
 
         # WT: initialize controlnet from the pretrained image variation SD model
         # controlnet_pose = ControlNetModel.from_unet(unet=unet, args=self.args)
@@ -193,7 +217,6 @@ class Net(nn.Module):
         self.vae = vae
         # self.controlnet = controlnet_unit
         self.unet = unet
-        self.appearance_encoder = appearance_encoder
         self.feature_extractor = feature_extractor
         self.clip_image_encoder = clip_image_encoder
         self.vae_scale_factor = 2 ** (len(self.vae.config.block_out_channels) - 1)
@@ -273,22 +296,20 @@ class Net(nn.Module):
                     if 'conv_in' in param_name:
                         param.requires_grad_(True)
                         param_unfreeze_num += 1
-                for param_name, param in self.appearance_encoder.named_parameters():
-                    if 'transformer_blocks' not in param_name:
-                        param.requires_grad_(False)
-                    else:
-                        param.requires_grad_(True)
-                        param_unfreeze_num += 1
+                    self.adapter_modules.requires_grad_(True)
 
             elif self.args.unet_unfreeze_type == 'all':
                 for param_name, param in self.unet.named_parameters():
                     param.requires_grad_(True)
                     param_unfreeze_num += 1
+                self.adapter_modules.requires_grad_(True)
+                
 
             else: # freeze all the unet
                 print('Unmatch to any option, freeze all the unet')
                 self.unet.eval()
                 self.unet.requires_grad_(False)
+                self.adapter_modules.requires_grad_(True)
 
             print(f"Mode [{self.args.unet_unfreeze_type}]: There are {param_unfreeze_num} modules in unet to be set as requires_grad=True.")
 
@@ -605,7 +626,11 @@ class Net(nn.Module):
         return latents
     
     def forward_train_multicontrol(self, inputs, outputs):
-        
+        # # use CFG
+        # if self.args.drop_ref > 0:
+        #     p = random.random()
+        #     if p <= self.args.drop_ref: # dropout ref image
+        #         inputs['reference_img'] = torch.zeros_like(inputs['reference_img'])
         loss_target = self.args.loss_target
         image = inputs['label_imgs']  # (B, C, H, W)
         ref_image = inputs['reference_img']
@@ -616,18 +641,13 @@ class Net(nn.Module):
             text = inputs['input_text']
             if random.random() < self.args.drop_text: # drop text w.r.t the prob
                 text = ["" for i in text]
-            text_zero = ["" for i in text]
-            # print('text',text)
             z_text = self.text_encode(text)
-            z_text_zero = self.text_encode(text_zero)
 
         # text SD input --> reference image input (clip global embedding)
         if self.args.combine_clip_local:
             refer_latents = self.clip_encode_image_local(ref_image).to(dtype=self.dtype)
         else:
             refer_latents = self.clip_encode_image_global(ref_image).to(dtype=self.dtype)
-        reference_control_writer = ReferenceAttentionControl(self.appearance_encoder, do_classifier_free_guidance=True, mode='write')
-        reference_control_reader = ReferenceAttentionControl(self.unet, do_classifier_free_guidance=True, mode='read')
         if self.args.add_shape:
             shape =torch.tensor([eval(s) for s in inputs['shape']])
             shape =shape[:,None,:].to(memory_format=torch.contiguous_format).float()
@@ -655,13 +675,7 @@ class Net(nn.Module):
             print(f"rank {get_rank()}: noise 0 mean {torch.sum(noise[0])}, noise 1 mean {torch.sum(noise[1])}")
             print(f"timestep 0 {timesteps[0]}, timestep 1 {timesteps[1]}")
         noisy_latents = self.tr_noise_scheduler.add_noise(latents, noise, timesteps)
-        ref_image_latents = self.image_encoder(ref_image).cuda()
-        self.appearance_encoder(
-            ref_image_latents.repeat(1, 1, 1, 1),
-            timesteps,
-            encoder_hidden_states=z_text_zero,
-            return_dict=False,
-        )
+
 
         # TODO: @tan, change cond_imgs in dataloadser to pose or other conditions.
         # controlnet_image = inputs["cond_imgs"].to(dtype=self.dtype)
@@ -701,15 +715,14 @@ class Net(nn.Module):
                 noisy_latents, timesteps, refer_latents, # both controlnet path use the refer latents
                 controlnet_cond=controlnet_image, return_dict=False)
         '''
-        
-        reference_control_reader.update(reference_control_writer)
         # Predict the noise residual
+        refer_latents_adp = torch.cat([z_text, refer_latents], dim=1) 
         model_pred = self.unet(
             noisy_latents,
             timesteps,
-            encoder_hidden_states=z_text # refer latents
+            encoder_hidden_states=refer_latents_adp # refer latents
         ).sample
-        reference_control_reader.clear()
+
         if loss_target == "x0":
             target = latents
             x0_pred = self.tr_noise_scheduler.remove_noise(noisy_latents, model_pred, timesteps)
@@ -724,7 +737,6 @@ class Net(nn.Module):
             loss = F.mse_loss(model_pred.float(), target.float(), reduction="mean")
 
         outputs['loss_total'] = loss
-        reference_control_writer.clear()
         return outputs
 
 
@@ -814,13 +826,11 @@ class Net(nn.Module):
      
         if self.args.ref_null_caption: # test must use null caption
             text = inputs['input_text']
-            text = ["" for i in text]
+            # text = ["" for i in text]
             text_embeddings = self.text_encode(
                 text, num_images_per_prompt=self.args.num_inf_images_per_prompt,
                 do_classifier_free_guidance=do_classifier_free_guidance,
                 negative_prompt=None)
-        reference_control_writer = ReferenceAttentionControl(self.appearance_encoder, do_classifier_free_guidance=True, mode='write')
-        reference_control_reader = ReferenceAttentionControl(self.unet, do_classifier_free_guidance=True, mode='read')
         if self.args.add_shape:
             shape =torch.tensor([eval(s) for s in inputs['shape']])
             shape =shape[:,None,:].to(memory_format=torch.contiguous_format).float()
@@ -910,28 +920,10 @@ class Net(nn.Module):
         # Prepare extra step kwargs.
         extra_step_kwargs = self.prepare_extra_step_kwargs(generator)
 
-        # For img2img setting
-        if self.args.num_actual_inference_steps is None:
-            num_actual_inference_steps = self.args.num_inference_steps
-        else:
-            num_actual_inference_steps = self.args.num_actual_inference_steps
-
-        ref_image_latents = self.image_encoder(ref_image).cuda()
-            
         # Denoising loop
         num_warmup_steps = len(timesteps) - self.args.num_inference_steps * self.noise_scheduler.order
         with self.progress_bar(total=self.args.num_inference_steps) as progress_bar:
             for i, t in enumerate(timesteps):
-                '''
-                if num_actual_inference_steps is not None and i < self.args.num_inference_steps - num_actual_inference_steps:
-                    continue
-                '''
-                self.appearance_encoder(
-                    ref_image_latents.repeat(2 if do_classifier_free_guidance else 1, 1, 1, 1),
-                    t,
-                    encoder_hidden_states=text_embeddings,
-                    return_dict=False,
-                )
                 # expand the latents if we are doing classifier free guidance
                 latent_model_input = torch.cat([latents] * 2) if do_classifier_free_guidance else latents
                 latent_model_input = self.noise_scheduler.scale_model_input(latent_model_input, t)
@@ -976,13 +968,13 @@ class Net(nn.Module):
                 '''
 
                 # predict the noise residual
-                reference_control_reader.update(reference_control_writer)
+                refer_latents_adp = torch.cat([text_embeddings, refer_latents], dim=1) 
                 noise_pred = self.unet(
                     latent_model_input,
                     t,
-                    encoder_hidden_states=text_embeddings,
+                    encoder_hidden_states=refer_latents_adp,
                     ).sample.to(dtype=self.dtype)
-                reference_control_reader.clear()
+
                 # perform guidance
                 if do_classifier_free_guidance:
                     noise_pred_uncond, noise_pred_text = noise_pred.chunk(2)
@@ -990,12 +982,10 @@ class Net(nn.Module):
 
                 # compute the previous noisy sample x_t -> x_t-1
                 latents = self.noise_scheduler.step(noise_pred, t, latents, **extra_step_kwargs).prev_sample
-                # print('==after',latents.shape)
-                # torch.Size([10, 4, 32, 24])
+
                 if i == len(timesteps) - 1 or (
                         (i + 1) > num_warmup_steps and (i + 1) % self.noise_scheduler.order == 0):
                     progress_bar.update()
-                reference_control_writer.clear()
 
         # Post-processing
         gen_img = self.image_decoder(latents)

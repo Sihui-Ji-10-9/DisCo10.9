@@ -55,7 +55,7 @@ class Args(BasicArgs):
     # sample
     num_inf_images_per_prompt = 1
     num_inference_steps = 50
-    guidance_scale = 7.5
+    guidance_scale = 4
 
     # others
     seed = 42

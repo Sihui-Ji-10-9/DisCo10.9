@@ -12,62 +12,69 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 from dataclasses import dataclass
-from typing import Any, Dict, Optional
+from typing import Optional
 
 import torch
 import torch.nn.functional as F
 from torch import nn
 
-from ..configuration_utils import ConfigMixin, register_to_config
-from ..models.embeddings import ImagePositionalEmbeddings
-from ..utils import USE_PEFT_BACKEND, BaseOutput, deprecate
+from diffusers.configuration_utils import ConfigMixin, register_to_config
+from diffusers.models.embeddings import ImagePositionalEmbeddings
+from diffusers.utils import BaseOutput, deprecate
 from .attention import BasicTransformerBlock
-from .embeddings import CaptionProjection, PatchEmbed
-from .lora import LoRACompatibleConv, LoRACompatibleLinear
-from .modeling_utils import ModelMixin
-from .normalization import AdaLayerNormSingle
+from diffusers.models.embeddings import PatchEmbed
+from diffusers.models.modeling_utils import ModelMixin
 
 
 @dataclass
 class Transformer2DModelOutput(BaseOutput):
     """
-    The output of [`Transformer2DModel`].
-
     Args:
         sample (`torch.FloatTensor` of shape `(batch_size, num_channels, height, width)` or `(batch size, num_vector_embeds - 1, num_latent_pixels)` if [`Transformer2DModel`] is discrete):
-            The hidden states output conditioned on the `encoder_hidden_states` input. If discrete, returns probability
-            distributions for the unnoised latent pixels.
+            Hidden states conditioned on `encoder_hidden_states` input. If discrete, returns probability distributions
+            for the unnoised latent pixels.
     """
 
     sample: torch.FloatTensor
+    hidden_states: Optional[torch.FloatTensor]
 
 
 class Transformer2DModel(ModelMixin, ConfigMixin):
     """
-    A 2D Transformer model for image-like data.
+    Transformer model for image-like data. Takes either discrete (classes of vector embeddings) or continuous (actual
+    embeddings) inputs.
+
+    When input is continuous: First, project the input (aka embedding) and reshape to b, t, d. Then apply standard
+    transformer action. Finally, reshape to image.
+
+    When input is discrete: First, input (classes of latent pixels) is converted to embeddings and has positional
+    embeddings applied, see `ImagePositionalEmbeddings`. Then apply standard transformer action. Finally, predict
+    classes of unnoised image.
+
+    Note that it is assumed one of the input classes is the masked latent pixel. The predicted classes of the unnoised
+    image do not contain a prediction for the masked pixel as the unnoised image cannot be masked.
 
     Parameters:
         num_attention_heads (`int`, *optional*, defaults to 16): The number of heads to use for multi-head attention.
         attention_head_dim (`int`, *optional*, defaults to 88): The number of channels in each head.
         in_channels (`int`, *optional*):
-            The number of channels in the input and output (specify if the input is **continuous**).
+            Pass if the input is continuous. The number of channels in the input and output.
         num_layers (`int`, *optional*, defaults to 1): The number of layers of Transformer blocks to use.
         dropout (`float`, *optional*, defaults to 0.0): The dropout probability to use.
-        cross_attention_dim (`int`, *optional*): The number of `encoder_hidden_states` dimensions to use.
-        sample_size (`int`, *optional*): The width of the latent images (specify if the input is **discrete**).
-            This is fixed during training since it is used to learn a number of position embeddings.
+        cross_attention_dim (`int`, *optional*): The number of encoder_hidden_states dimensions to use.
+        sample_size (`int`, *optional*): Pass if the input is discrete. The width of the latent images.
+            Note that this is fixed at training time as it is used for learning a number of position embeddings. See
+            `ImagePositionalEmbeddings`.
         num_vector_embeds (`int`, *optional*):
-            The number of classes of the vector embeddings of the latent pixels (specify if the input is **discrete**).
+            Pass if the input is discrete. The number of classes of the vector embeddings of the latent pixels.
             Includes the class for the masked latent pixel.
-        activation_fn (`str`, *optional*, defaults to `"geglu"`): Activation function to use in feed-forward.
-        num_embeds_ada_norm ( `int`, *optional*):
-            The number of diffusion steps used during training. Pass if at least one of the norm_layers is
-            `AdaLayerNorm`. This is fixed during training since it is used to learn a number of embeddings that are
-            added to the hidden states.
-
-            During inference, you can denoise for up to but not more steps than `num_embeds_ada_norm`.
+        activation_fn (`str`, *optional*, defaults to `"geglu"`): Activation function to be used in feed-forward.
+        num_embeds_ada_norm ( `int`, *optional*): Pass if at least one of the norm_layers is `AdaLayerNorm`.
+            The number of diffusion steps used during training. Note that this is fixed at training time as it is used
+            to learn a number of embeddings that are added to the hidden states. During inference, you can denoise for
+            up to but not more than steps than `num_embeds_ada_norm`.
         attention_bias (`bool`, *optional*):
-            Configure if the `TransformerBlocks` attention should contain a bias parameter.
+            Configure if the TransformerBlocks' attention should contain a bias parameter.
     """
 
     @register_to_config
@@ -89,13 +96,9 @@ class Transformer2DModel(ModelMixin, ConfigMixin):
         num_embeds_ada_norm: Optional[int] = None,
         use_linear_projection: bool = False,
         only_cross_attention: bool = False,
-        double_self_attention: bool = False,
         upcast_attention: bool = False,
         norm_type: str = "layer_norm",
         norm_elementwise_affine: bool = True,
-        norm_eps: float = 1e-5,
-        attention_type: str = "default",
-        caption_channels: int = None,
     ):
         super().__init__()
         self.use_linear_projection = use_linear_projection
@@ -103,10 +106,7 @@ class Transformer2DModel(ModelMixin, ConfigMixin):
         self.attention_head_dim = attention_head_dim
         inner_dim = num_attention_heads * attention_head_dim
 
-        conv_cls = nn.Conv2d if USE_PEFT_BACKEND else LoRACompatibleConv
-        linear_cls = nn.Linear if USE_PEFT_BACKEND else LoRACompatibleLinear
-
-        # 1. Transformer2DModel can process both standard continuous images of shape `(batch_size, num_channels, width, height)` as well as quantized image embeddings of shape `(batch_size, num_image_vectors)`
+        # 1. Transformer2DModel can process both standard continous images of shape `(batch_size, num_channels, width, height)` as well as quantized image embeddings of shape `(batch_size, num_image_vectors)`
         # Define whether input is continuous or discrete depending on configuration
         self.is_input_continuous = (in_channels is not None) and (patch_size is None)
         self.is_input_vectorized = num_vector_embeds is not None
@@ -145,9 +145,9 @@ class Transformer2DModel(ModelMixin, ConfigMixin):
 
             self.norm = torch.nn.GroupNorm(num_groups=norm_num_groups, num_channels=in_channels, eps=1e-6, affine=True)
             if use_linear_projection:
-                self.proj_in = linear_cls(in_channels, inner_dim)
+                self.proj_in = nn.Linear(in_channels, inner_dim)
             else:
-                self.proj_in = conv_cls(in_channels, inner_dim, kernel_size=1, stride=1, padding=0)
+                self.proj_in = nn.Conv2d(in_channels, inner_dim, kernel_size=1, stride=1, padding=0)
         elif self.is_input_vectorized:
             assert sample_size is not None, "Transformer2DModel over discrete input must provide sample_size"
             assert num_vector_embeds is not None, "Transformer2DModel over discrete input must provide num_embed"
@@ -167,15 +167,12 @@ class Transformer2DModel(ModelMixin, ConfigMixin):
             self.width = sample_size
 
             self.patch_size = patch_size
-            interpolation_scale = self.config.sample_size // 64  # => 64 (= 512 pixart) has interpolation scale 1
-            interpolation_scale = max(interpolation_scale, 1)
             self.pos_embed = PatchEmbed(
                 height=sample_size,
                 width=sample_size,
                 patch_size=patch_size,
                 in_channels=in_channels,
                 embed_dim=inner_dim,
-                interpolation_scale=interpolation_scale,
             )
 
         # 3. Define transformers blocks
@@ -191,12 +188,9 @@ class Transformer2DModel(ModelMixin, ConfigMixin):
                     num_embeds_ada_norm=num_embeds_ada_norm,
                     attention_bias=attention_bias,
                     only_cross_attention=only_cross_attention,
-                    double_self_attention=double_self_attention,
                     upcast_attention=upcast_attention,
                     norm_type=norm_type,
                     norm_elementwise_affine=norm_elementwise_affine,
-                    norm_eps=norm_eps,
-                    attention_type=attention_type,
                 )
                 for d in range(num_layers)
             ]
@@ -205,114 +199,50 @@ class Transformer2DModel(ModelMixin, ConfigMixin):
         # 4. Define output layers
         self.out_channels = in_channels if out_channels is None else out_channels
         if self.is_input_continuous:
-            # TODO: should use out_channels for continuous projections
+            # TODO: should use out_channels for continous projections
             if use_linear_projection:
-                self.proj_out = linear_cls(inner_dim, in_channels)
+                self.proj_out = nn.Linear(inner_dim, in_channels)
             else:
-                self.proj_out = conv_cls(inner_dim, in_channels, kernel_size=1, stride=1, padding=0)
+                self.proj_out = nn.Conv2d(inner_dim, in_channels, kernel_size=1, stride=1, padding=0)
         elif self.is_input_vectorized:
             self.norm_out = nn.LayerNorm(inner_dim)
             self.out = nn.Linear(inner_dim, self.num_vector_embeds - 1)
-        elif self.is_input_patches and norm_type != "ada_norm_single":
+        elif self.is_input_patches:
             self.norm_out = nn.LayerNorm(inner_dim, elementwise_affine=False, eps=1e-6)
             self.proj_out_1 = nn.Linear(inner_dim, 2 * inner_dim)
             self.proj_out_2 = nn.Linear(inner_dim, patch_size * patch_size * self.out_channels)
-        elif self.is_input_patches and norm_type == "ada_norm_single":
-            self.norm_out = nn.LayerNorm(inner_dim, elementwise_affine=False, eps=1e-6)
-            self.scale_shift_table = nn.Parameter(torch.randn(2, inner_dim) / inner_dim**0.5)
-            self.proj_out = nn.Linear(inner_dim, patch_size * patch_size * self.out_channels)
-
-        # 5. PixArt-Alpha blocks.
-        self.adaln_single = None
-        self.use_additional_conditions = False
-        if norm_type == "ada_norm_single":
-            self.use_additional_conditions = self.config.sample_size == 128
-            # TODO(Sayak, PVP) clean this, for now we use sample size to determine whether to use
-            # additional conditions until we find better name
-            self.adaln_single = AdaLayerNormSingle(inner_dim, use_additional_conditions=self.use_additional_conditions)
-
-        self.caption_projection = None
-        if caption_channels is not None:
-            self.caption_projection = CaptionProjection(in_features=caption_channels, hidden_size=inner_dim)
-
-        self.gradient_checkpointing = False
 
     def forward(
         self,
-        hidden_states: torch.Tensor,
-        encoder_hidden_states: Optional[torch.Tensor] = None,
-        timestep: Optional[torch.LongTensor] = None,
-        added_cond_kwargs: Dict[str, torch.Tensor] = None,
-        class_labels: Optional[torch.LongTensor] = None,
-        cross_attention_kwargs: Dict[str, Any] = None,
-        attention_mask: Optional[torch.Tensor] = None,
-        encoder_attention_mask: Optional[torch.Tensor] = None,
+        hidden_states,
+        encoder_hidden_states=None,
+        timestep=None,
+        class_labels=None,
+        cross_attention_kwargs=None,
+        refer_hs=None,
         return_dict: bool = True,
     ):
         """
-        The [`Transformer2DModel`] forward method.
-
         Args:
-            hidden_states (`torch.LongTensor` of shape `(batch size, num latent pixels)` if discrete, `torch.FloatTensor` of shape `(batch size, channel, height, width)` if continuous):
-                Input `hidden_states`.
-            encoder_hidden_states ( `torch.FloatTensor` of shape `(batch size, sequence len, embed dims)`, *optional*):
+            hidden_states ( When discrete, `torch.LongTensor` of shape `(batch size, num latent pixels)`.
+                When continous, `torch.FloatTensor` of shape `(batch size, channel, height, width)`): Input
+                hidden_states
+            encoder_hidden_states ( `torch.LongTensor` of shape `(batch size, encoder_hidden_states dim)`, *optional*):
                 Conditional embeddings for cross attention layer. If not given, cross-attention defaults to
                 self-attention.
-            timestep ( `torch.LongTensor`, *optional*):
-                Used to indicate denoising step. Optional timestep to be applied as an embedding in `AdaLayerNorm`.
+            timestep ( `torch.long`, *optional*):
+                Optional timestep to be applied as an embedding in AdaLayerNorm's. Used to indicate denoising step.
             class_labels ( `torch.LongTensor` of shape `(batch size, num classes)`, *optional*):
-                Used to indicate class labels conditioning. Optional class labels to be applied as an embedding in
-                `AdaLayerZeroNorm`.
-            cross_attention_kwargs ( `Dict[str, Any]`, *optional*):
-                A kwargs dictionary that if specified is passed along to the `AttentionProcessor` as defined under
-                `self.processor` in
-                [diffusers.models.attention_processor](https://github.com/huggingface/diffusers/blob/main/src/diffusers/models/attention_processor.py).
-            attention_mask ( `torch.Tensor`, *optional*):
-                An attention mask of shape `(batch, key_tokens)` is applied to `encoder_hidden_states`. If `1` the mask
-                is kept, otherwise if `0` it is discarded. Mask will be converted into a bias, which adds large
-                negative values to the attention scores corresponding to "discard" tokens.
-            encoder_attention_mask ( `torch.Tensor`, *optional*):
-                Cross-attention mask applied to `encoder_hidden_states`. Two formats supported:
-
-                    * Mask `(batch, sequence_length)` True = keep, False = discard.
-                    * Bias `(batch, 1, sequence_length)` 0 = keep, -10000 = discard.
-
-                If `ndim == 2`: will be interpreted as a mask, then converted into a bias consistent with the format
-                above. This bias will be added to the cross-attention scores.
+                Optional class labels to be applied as an embedding in AdaLayerZeroNorm. Used to indicate class labels
+                conditioning.
             return_dict (`bool`, *optional*, defaults to `True`):
-                Whether or not to return a [`~models.unet_2d_condition.UNet2DConditionOutput`] instead of a plain
-                tuple.
+                Whether or not to return a [`models.unet_2d_condition.UNet2DConditionOutput`] instead of a plain tuple.
 
         Returns:
-            If `return_dict` is True, an [`~models.transformer_2d.Transformer2DModelOutput`] is returned, otherwise a
-            `tuple` where the first element is the sample tensor.
+            [`~models.transformer_2d.Transformer2DModelOutput`] or `tuple`:
+            [`~models.transformer_2d.Transformer2DModelOutput`] if `return_dict` is True, otherwise a `tuple`. When
+            returning a tuple, the first element is the sample tensor.
         """
-        # ensure attention_mask is a bias, and give it a singleton query_tokens dimension.
-        #   we may have done this conversion already, e.g. if we came here via UNet2DConditionModel#forward.
-        #   we can tell by counting dims; if ndim == 2: it's a mask rather than a bias.
-        # expects mask of shape:
-        #   [batch, key_tokens]
-        # adds singleton query_tokens dimension:
-        #   [batch,                    1, key_tokens]
-        # this helps to broadcast it as a bias over attention scores, which will be in one of the following shapes:
-        #   [batch,  heads, query_tokens, key_tokens] (e.g. torch sdp attn)
-        #   [batch * heads, query_tokens, key_tokens] (e.g. xformers or classic attn)
-        if attention_mask is not None and attention_mask.ndim == 2:
-            # assume that mask is expressed as:
-            #   (1 = keep,      0 = discard)
-            # convert mask into a bias that can be added to attention scores:
-            #       (keep = +0,     discard = -10000.0)
-            attention_mask = (1 - attention_mask.to(hidden_states.dtype)) * -10000.0
-            attention_mask = attention_mask.unsqueeze(1)
-
-        # convert encoder_attention_mask to a bias the same way we do for attention_mask
-        if encoder_attention_mask is not None and encoder_attention_mask.ndim == 2:
-            encoder_attention_mask = (1 - encoder_attention_mask.to(hidden_states.dtype)) * -10000.0
-            encoder_attention_mask = encoder_attention_mask.unsqueeze(1)
-
-        # Retrieve lora scale.
-        lora_scale = cross_attention_kwargs.get("scale", 1.0) if cross_attention_kwargs is not None else 1.0
-
         # 1. Input
         if self.is_input_continuous:
             batch, _, height, width = hidden_states.shape
@@ -320,82 +250,39 @@ class Transformer2DModel(ModelMixin, ConfigMixin):
 
             hidden_states = self.norm(hidden_states)
             if not self.use_linear_projection:
-                hidden_states = (
-                    self.proj_in(hidden_states, scale=lora_scale)
-                    if not USE_PEFT_BACKEND
-                    else self.proj_in(hidden_states)
-                )
+                hidden_states = self.proj_in(hidden_states)
                 inner_dim = hidden_states.shape[1]
                 hidden_states = hidden_states.permute(0, 2, 3, 1).reshape(batch, height * width, inner_dim)
             else:
                 inner_dim = hidden_states.shape[1]
                 hidden_states = hidden_states.permute(0, 2, 3, 1).reshape(batch, height * width, inner_dim)
-                hidden_states = (
-                    self.proj_in(hidden_states, scale=lora_scale)
-                    if not USE_PEFT_BACKEND
-                    else self.proj_in(hidden_states)
-                )
-
+                hidden_states = self.proj_in(hidden_states)
         elif self.is_input_vectorized:
             hidden_states = self.latent_image_embedding(hidden_states)
         elif self.is_input_patches:
             hidden_states = self.pos_embed(hidden_states)
 
-            if self.adaln_single is not None:
-                if self.use_additional_conditions and added_cond_kwargs is None:
-                    raise ValueError(
-                        "`added_cond_kwargs` cannot be None when using additional conditions for `adaln_single`."
-                    )
-                batch_size = hidden_states.shape[0]
-                timestep, embedded_timestep = self.adaln_single(
-                    timestep, added_cond_kwargs, batch_size=batch_size, hidden_dtype=hidden_states.dtype
-                )
-
         # 2. Blocks
-        if self.caption_projection is not None:
-            batch_size = hidden_states.shape[0]
-            encoder_hidden_states = self.caption_projection(encoder_hidden_states)
-            encoder_hidden_states = encoder_hidden_states.view(batch_size, -1, hidden_states.shape[-1])
-
-        for block in self.transformer_blocks:
-            if self.training and self.gradient_checkpointing:
-                hidden_states = torch.utils.checkpoint.checkpoint(
-                    block,
-                    hidden_states,
-                    attention_mask,
-                    encoder_hidden_states,
-                    encoder_attention_mask,
-                    timestep,
-                    cross_attention_kwargs,
-                    class_labels,
-                    use_reentrant=False,
-                )
-            else:
-                hidden_states = block(
-                    hidden_states,
-                    attention_mask=attention_mask,
-                    encoder_hidden_states=encoder_hidden_states,
-                    encoder_attention_mask=encoder_attention_mask,
-                    timestep=timestep,
-                    cross_attention_kwargs=cross_attention_kwargs,
-                    class_labels=class_labels,
-                )
+        output_refer_states = ()
+        for i, block in enumerate(self.transformer_blocks):
+            hidden_states, o_refer_hs = block(
+                hidden_states,
+                encoder_hidden_states=encoder_hidden_states,
+                timestep=timestep,
+                cross_attention_kwargs=cross_attention_kwargs,
+                class_labels=class_labels,
+                refer_hs=refer_hs[i] if refer_hs is not None else None,
+            )
+            if o_refer_hs is not None:
+                output_refer_states += (o_refer_hs,)
 
         # 3. Output
         if self.is_input_continuous:
             if not self.use_linear_projection:
                 hidden_states = hidden_states.reshape(batch, height, width, inner_dim).permute(0, 3, 1, 2).contiguous()
-                hidden_states = (
-                    self.proj_out(hidden_states, scale=lora_scale)
-                    if not USE_PEFT_BACKEND
-                    else self.proj_out(hidden_states)
-                )
+                hidden_states = self.proj_out(hidden_states)
             else:
-                hidden_states = (
-                    self.proj_out(hidden_states, scale=lora_scale)
-                    if not USE_PEFT_BACKEND
-                    else self.proj_out(hidden_states)
-                )
+                hidden_states = self.proj_out(hidden_states)
                 hidden_states = hidden_states.reshape(batch, height, width, inner_dim).permute(0, 3, 1, 2).contiguous()
 
             output = hidden_states + residual
@@ -407,22 +294,14 @@ class Transformer2DModel(ModelMixin, ConfigMixin):
 
             # log(p(x_0))
             output = F.log_softmax(logits.double(), dim=1).float()
-
-        if self.is_input_patches:
-            if self.config.norm_type != "ada_norm_single":
-                conditioning = self.transformer_blocks[0].norm1.emb(
-                    timestep, class_labels, hidden_dtype=hidden_states.dtype
-                )
-                shift, scale = self.proj_out_1(F.silu(conditioning)).chunk(2, dim=1)
-                hidden_states = self.norm_out(hidden_states) * (1 + scale[:, None]) + shift[:, None]
-                hidden_states = self.proj_out_2(hidden_states)
-            elif self.config.norm_type == "ada_norm_single":
-                shift, scale = (self.scale_shift_table[None] + embedded_timestep[:, None]).chunk(2, dim=1)
-                hidden_states = self.norm_out(hidden_states)
-                # Modulation
-                hidden_states = hidden_states * (1 + scale) + shift
-                hidden_states = self.proj_out(hidden_states)
-                hidden_states = hidden_states.squeeze(1)
+        elif self.is_input_patches:
+            # TODO: cleanup!
+            conditioning = self.transformer_blocks[0].norm1.emb(
+                timestep, class_labels, hidden_dtype=hidden_states.dtype
+            )
+            shift, scale = self.proj_out_1(F.silu(conditioning)).chunk(2, dim=1)
+            hidden_states = self.norm_out(hidden_states) * (1 + scale[:, None]) + shift[:, None]
+            hidden_states = self.proj_out_2(hidden_states)
 
             # unpatchify
             height = width = int(hidden_states.shape[1] ** 0.5)
@@ -434,7 +313,10 @@ class Transformer2DModel(ModelMixin, ConfigMixin):
                 shape=(-1, self.out_channels, height * self.patch_size, width * self.patch_size)
             )
 
-        if not return_dict:
-            return (output,)
+        if output_refer_states == ():
+            output_refer_states = None
 
-        return Transformer2DModelOutput(sample=output)
+        if not return_dict:
+            return (output, output_refer_states)
+
+        return Transformer2DModelOutput(sample=output, hidden_states=output_refer_states)

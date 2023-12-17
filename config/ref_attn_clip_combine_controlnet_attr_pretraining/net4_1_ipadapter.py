@@ -2,7 +2,7 @@ import torch
 from utils.dist import synchronize, get_rank
 
 from config import *
-from typing import Callable, List, Optional, Union
+from typing import Callable, List, Optional, Union, Tuple
 
 import inspect
 from typing import Callable, List, Optional, Union
@@ -35,6 +35,13 @@ import imageio
 # from consistencydecoder import ConsistencyDecoder
 from magicanimate.models.appearance_encoder import AppearanceEncoderModel
 from magicanimate.models.mutual_self_attention import ReferenceAttentionControl
+from diffusers.configuration_utils import ConfigMixin, register_to_config
+from diffusers.models.modeling_utils import ModelMixin
+from IP_Adapter.ip_adapter.utils import is_torch2_available
+if is_torch2_available():
+    from IP_Adapter.ip_adapter.attention_processor import IPAttnProcessor2_0 as IPAttnProcessor, AttnProcessor2_0 as AttnProcessor
+else:
+    from IP_Adapter.ip_adapter.attention_processor import IPAttnProcessor, AttnProcessor
 
 class Net(nn.Module):
     def __init__(
@@ -62,7 +69,7 @@ class Net(nn.Module):
         # feature_extractor = CLIPImageProcessor.from_pretrained(args.pretrained_model_path, subfolder="feature_extractor")
         # feature_extractor = AutoImageProcessor.from_pretrained(args.dinov2_model_path, crop_size={'height': args.img_full_size[0], 'width': args.img_full_size[0]})
         feature_extractor = AutoImageProcessor.from_pretrained('huggingface/hub/models--facebook--dinov2-large/snapshots/47b73eefe95e8d44ec3623f8890bd894b6ea2d6c', crop_size={'height': args.img_full_size[0], 'width': args.img_full_size[0]})
-        print(f"Loading pre-trained image_encoder from {args.pretrained_model_path}/image_encoder")
+        # print(f"Loading pre-trained image_encoder from {args.pretrained_model_path}/image_encoder")
         # clip_image_encoder = CLIPVisionModelWithProjection.from_pretrained(args.pretrained_model_path, subfolder="image_encoder")
         
         print(f'Loading DINOv2 image encoder, version {self.args.dinov2_version}')
@@ -80,9 +87,11 @@ class Net(nn.Module):
         # self.dinov2_head = nn.Linear(1536, 768)
         # self.dinov2_head.requires_grad_(True)
 
-        print(f"Loading pre-trained vae from {args.pretrained_model_path}/vae")
-        vae = AutoencoderKL.from_pretrained(
-            args.pretrained_model_path+"/vae")
+        # print(f"Loading pre-trained vae from {args.pretrained_model_path}/vae")
+        print(f"Loading pre-trained vae from /home/nfs/jsh/DisCo/diffusers/sd-vae-ft-mse")
+        # vae = AutoencoderKL.from_pretrained(
+        #     args.pretrained_model_path, subfolder="vae")
+        vae = AutoencoderKL.from_pretrained('/home/nfs/jsh/DisCo/diffusers/sd-vae-ft-mse')
         print(f"Loading pre-trained unet from {self.args.pretrained_model_path}/unet")
         unet = UNet2DConditionModel.from_pretrained(
             self.args.pretrained_model_path, subfolder="unet")
@@ -93,7 +102,7 @@ class Net(nn.Module):
             text_encoder = CLIPTextModel.from_pretrained(self.args.sd15_path + "/text_encoder")
             self.text_encoder = text_encoder
         # appearance_encoder = AppearanceEncoderModel.from_pretrained(self.args.pretrained_appearance_encoder_path, subfolder="appearance_encoder")
-        appearance_encoder = AppearanceEncoderModel.from_pretrained(self.args.pretrained_model_path, subfolder="unet")
+        # appearance_encoder = AppearanceEncoderModel.from_pretrained(self.args.pretrained_model_path, subfolder="unet")
         # ok!
 
         if hasattr(noise_scheduler.config, "steps_offset") and noise_scheduler.config.steps_offset != 1:
@@ -159,13 +168,48 @@ class Net(nn.Module):
             # torch.Size([320, 4, 3, 3])
             unet.conv_in.weight[:, 4:] = torch.zeros(unet.conv_in.weight[:, 4:].shape) # new weights initialized to zero
         
+        if getattr(self.args, 'combine_clip_local', None) and not getattr(self.args, 'refer_clip_proj', None): # not use clip pretrained visual projection (but initialize from it)
+            # self.refer_clip_proj = torch.nn.Linear(clip_image_encoder.visual_projection.in_features, clip_image_encoder.visual_projection.out_features, bias=False)
+            # self.refer_clip_proj.load_state_dict(clip_image_encoder.visual_projection.state_dict())
+            self.refer_clip_proj = DINO_ADAPTER(in_channels_lst=(1024, 1024, 1024, 1024),out_channels_lst=(768, 768, 768, 768))
+            self.refer_clip_proj.requires_grad_(True)
+        
+        # init adapter modules
+        attn_procs = {}
+        unet_sd = unet.state_dict()
+        for name in unet.attn_processors.keys():
+            cross_attention_dim = None if name.endswith("attn1.processor") else unet.config.cross_attention_dim
+            if name.startswith("mid_block"):
+                hidden_size = unet.config.block_out_channels[-1]
+            elif name.startswith("up_blocks"):
+                block_id = int(name[len("up_blocks.")])
+                hidden_size = list(reversed(unet.config.block_out_channels))[block_id]
+            elif name.startswith("down_blocks"):
+                block_id = int(name[len("down_blocks.")])
+                hidden_size = unet.config.block_out_channels[block_id]
+            if cross_attention_dim is None:
+                attn_procs[name] = AttnProcessor()
+            else:
+                layer_name = name.split(".processor")[0]
+                weights = {
+                    "to_k_ip.weight": unet_sd[layer_name + ".to_k.weight"],
+                    "to_v_ip.weight": unet_sd[layer_name + ".to_v.weight"],
+                }
+                attn_procs[name] = IPAttnProcessor(hidden_size=hidden_size, cross_attention_dim=cross_attention_dim)
+                attn_procs[name].load_state_dict(weights)
+        
+        
+        # ip_adapter = IPAdapter(unet, image_proj_model, adapter_modules, args.pretrained_ip_adapter_path)
+
         if self.args.enable_xformers_memory_efficient_attention:
             if is_xformers_available():
                 unet.enable_xformers_memory_efficient_attention()
-                appearance_encoder.enable_xformers_memory_efficient_attention()
+                # appearance_encoder.enable_xformers_memory_efficient_attention()
             else:
                 print("xformers is not available, therefore not enabled")
-
+        unet.set_attn_processor(attn_procs)
+        self.adapter_modules = torch.nn.ModuleList(unet.attn_processors.values())
+        # self.adapter_modules.requires_grad_(True)
 
         # WT: initialize controlnet from the pretrained image variation SD model
         # controlnet_pose = ControlNetModel.from_unet(unet=unet, args=self.args)
@@ -193,7 +237,7 @@ class Net(nn.Module):
         self.vae = vae
         # self.controlnet = controlnet_unit
         self.unet = unet
-        self.appearance_encoder = appearance_encoder
+        # self.appearance_encoder = appearance_encoder
         self.feature_extractor = feature_extractor
         self.clip_image_encoder = clip_image_encoder
         self.vae_scale_factor = 2 ** (len(self.vae.config.block_out_channels) - 1)
@@ -208,14 +252,6 @@ class Net(nn.Module):
         self.controlnet_conditioning_scale_cond = getattr(self.args, "controlnet_conditioning_scale_cond", 1.0)
         self.controlnet_conditioning_scale_ref = getattr(self.args, "controlnet_conditioning_scale_ref", 1.0)
 
-        
-        if getattr(self.args, 'combine_clip_local', None) and not getattr(self.args, 'refer_clip_proj', None): # not use clip pretrained visual projection (but initialize from it)
-            # self.refer_clip_proj = torch.nn.Linear(clip_image_encoder.visual_projection.in_features, clip_image_encoder.visual_projection.out_features, bias=False)
-            # self.refer_clip_proj.load_state_dict(clip_image_encoder.visual_projection.state_dict())
-            self.refer_clip_proj = nn.Sequential(
-                                nn.Linear(1024, 768),
-                                nn.LayerNorm(768))
-            self.refer_clip_proj.requires_grad_(True)
         if args.add_shape:
             self.cc_projection1 = nn.Linear(10,1000)
             self.relu = nn.ReLU()
@@ -273,12 +309,12 @@ class Net(nn.Module):
                     if 'conv_in' in param_name:
                         param.requires_grad_(True)
                         param_unfreeze_num += 1
-                for param_name, param in self.appearance_encoder.named_parameters():
-                    if 'transformer_blocks' not in param_name:
-                        param.requires_grad_(False)
-                    else:
-                        param.requires_grad_(True)
-                        param_unfreeze_num += 1
+                # for param_name, param in self.appearance_encoder.named_parameters():
+                #     if 'transformer_blocks' not in param_name:
+                #         param.requires_grad_(False)
+                #     else:
+                #         param.requires_grad_(True)
+                #         param_unfreeze_num += 1
 
             elif self.args.unet_unfreeze_type == 'all':
                 for param_name, param in self.unet.named_parameters():
@@ -289,6 +325,7 @@ class Net(nn.Module):
                 print('Unmatch to any option, freeze all the unet')
                 self.unet.eval()
                 self.unet.requires_grad_(False)
+                self.adapter_modules.requires_grad_(True)
 
             print(f"Mode [{self.args.unet_unfreeze_type}]: There are {param_unfreeze_num} modules in unet to be set as requires_grad=True.")
 
@@ -486,29 +523,53 @@ class Net(nn.Module):
             image = self.feature_extractor(images=image, return_tensors="pt").pixel_values
             # print('=========================!') no use
         image = image.to(device=self.device, dtype=dtype)
-        last_hidden_states = self.clip_image_encoder(image).last_hidden_state
-        last_hidden_states_norm = last_hidden_states #self.clip_image_encoder.vision_model.post_layernorm(last_hidden_states)
+        # last_hidden_states = self.clip_image_encoder(image).last_hidden_state
+        # last_hidden_states_norm = last_hidden_states #self.clip_image_encoder.vision_model.post_layernorm(last_hidden_states)
         # print('====',last_hidden_states_norm.shape) === torch.Size([4, 257, 1024]) 
+        hidden_states_lst = self.clip_image_encoder(image, output_hidden_states=True).hidden_states
+        hidden_states_lst_ = [hidden_states_lst[-1-18].to(dtype=self.dtype),
+                        hidden_states_lst[-1-12].to(dtype=self.dtype),
+                        hidden_states_lst[-1-6].to(dtype=self.dtype),
+                        hidden_states_lst[-1].to(dtype=self.dtype),]
+        # print('!!!,',hidden_states_lst_[0].shape,hidden_states_lst_[1].shape,hidden_states_lst_[2].shape,hidden_states_lst_[3].shape)
+        # !!!, torch.Size([1, 973, 1024]) torch.Size([1, 973, 1024]) torch.Size([1, 973, 1024]) torch.Size([1, 973, 1024])
         if self.args.refer_clip_proj: # directly use clip pretrained projection layer
             image_embeddings = self.clip_image_encoder.visual_projection(last_hidden_states_norm)
         else:
-            image_embeddings = self.refer_clip_proj(last_hidden_states_norm.to(dtype=self.dtype))
+            # image_embeddings = self.refer_clip_proj(last_hidden_states_norm.to(dtype=self.dtype))
+            image_embeddings = self.refer_clip_proj(hidden_states_lst_)
         # image_embeddings = image_embeddings.unsqueeze(1)
 
         # duplicate image embeddings for each generation per prompt, using mps friendly method
-        bs_embed, seq_len, _ = image_embeddings.shape
-        image_embeddings = image_embeddings.repeat(1, num_images_per_prompt, 1)
-        image_embeddings = image_embeddings.view(bs_embed * num_images_per_prompt, seq_len, -1)
+        if isinstance(image_embeddings, list):#dylee
+            image_embeddings_tmp=[]
+            for emb in image_embeddings:
+                bs_embed, seq_len, _ = emb.shape
+                emb = emb.repeat(1, num_images_per_prompt, 1)
+                emb = emb.view(bs_embed * num_images_per_prompt, seq_len, -1)
+                if do_classifier_free_guidance:
+                    negative_prompt_embeds = torch.zeros_like(emb)
 
-        if do_classifier_free_guidance:
-            negative_prompt_embeds = torch.zeros_like(image_embeddings)
+                    # For classifier free guidance, we need to do two forward passes.
+                    # Here we concatenate the unconditional and text embeddings into a single batch
+                    # to avoid doing two forward passes
+                    emb = torch.cat([negative_prompt_embeds, emb])
+                image_embeddings_tmp.append(emb)
+            image_embeddings = image_embeddings_tmp
+        else:
+            bs_embed, seq_len, _ = image_embeddings.shape
+            image_embeddings = image_embeddings.repeat(1, num_images_per_prompt, 1)
+            image_embeddings = image_embeddings.view(bs_embed * num_images_per_prompt, seq_len, -1)
 
-            # For classifier free guidance, we need to do two forward passes.
-            # Here we concatenate the unconditional and text embeddings into a single batch
-            # to avoid doing two forward passes
-            image_embeddings = torch.cat([negative_prompt_embeds, image_embeddings])
+            if do_classifier_free_guidance:
+                negative_prompt_embeds = torch.zeros_like(image_embeddings)
 
-        return image_embeddings.to(dtype=self.dtype)    
+                # For classifier free guidance, we need to do two forward passes.
+                # Here we concatenate the unconditional and text embeddings into a single batch
+                # to avoid doing two forward passes
+                image_embeddings = torch.cat([negative_prompt_embeds, image_embeddings])
+
+        return image_embeddings #.to(dtype=self.dtype)    
     def decode_latents(self, latents):
         latents = 1 / 0.18215 * latents
         image = self.vae.decode(latents).sample
@@ -617,17 +678,17 @@ class Net(nn.Module):
             if random.random() < self.args.drop_text: # drop text w.r.t the prob
                 text = ["" for i in text]
             text_zero = ["" for i in text]
-            # print('text',text)
             z_text = self.text_encode(text)
             z_text_zero = self.text_encode(text_zero)
 
+
         # text SD input --> reference image input (clip global embedding)
         if self.args.combine_clip_local:
-            refer_latents = self.clip_encode_image_local(ref_image).to(dtype=self.dtype)
+            refer_latents = self.clip_encode_image_local(ref_image)#.to(dtype=self.dtype)
         else:
             refer_latents = self.clip_encode_image_global(ref_image).to(dtype=self.dtype)
-        reference_control_writer = ReferenceAttentionControl(self.appearance_encoder, do_classifier_free_guidance=True, mode='write')
-        reference_control_reader = ReferenceAttentionControl(self.unet, do_classifier_free_guidance=True, mode='read')
+        # reference_control_writer = ReferenceAttentionControl(self.appearance_encoder, do_classifier_free_guidance=True, mode='write')
+        # reference_control_reader = ReferenceAttentionControl(self.unet, do_classifier_free_guidance=True, mode='read')
         if self.args.add_shape:
             shape =torch.tensor([eval(s) for s in inputs['shape']])
             shape =shape[:,None,:].to(memory_format=torch.contiguous_format).float()
@@ -655,13 +716,13 @@ class Net(nn.Module):
             print(f"rank {get_rank()}: noise 0 mean {torch.sum(noise[0])}, noise 1 mean {torch.sum(noise[1])}")
             print(f"timestep 0 {timesteps[0]}, timestep 1 {timesteps[1]}")
         noisy_latents = self.tr_noise_scheduler.add_noise(latents, noise, timesteps)
-        ref_image_latents = self.image_encoder(ref_image).cuda()
-        self.appearance_encoder(
-            ref_image_latents.repeat(1, 1, 1, 1),
-            timesteps,
-            encoder_hidden_states=z_text_zero,
-            return_dict=False,
-        )
+        # ref_image_latents = self.image_encoder(ref_image).cuda()
+        # self.appearance_encoder(
+        #     ref_image_latents.repeat(1, 1, 1, 1),
+        #     timesteps,
+        #     encoder_hidden_states=refer_latents,
+        #     return_dict=False,
+        # )
 
         # TODO: @tan, change cond_imgs in dataloadser to pose or other conditions.
         # controlnet_image = inputs["cond_imgs"].to(dtype=self.dtype)
@@ -702,17 +763,29 @@ class Net(nn.Module):
                 controlnet_cond=controlnet_image, return_dict=False)
         '''
         
-        reference_control_reader.update(reference_control_writer)
+        # reference_control_reader.update(reference_control_writer)
         # Predict the noise residual
+        # refer_latents_tensor = torch.stack(refer_latents)
+        # refer_latents_adp = torch.cat([z_text, refer_latents_tensor], dim=1)
+        refer_latents_adp = [torch.cat([z_text, latents], dim=1) for latents in refer_latents]
         model_pred = self.unet(
             noisy_latents,
             timesteps,
-            encoder_hidden_states=z_text # refer latents
+            encoder_hidden_states=refer_latents_adp # refer latents
         ).sample
-        reference_control_reader.clear()
+        # reference_control_reader.clear()
         if loss_target == "x0":
             target = latents
-            x0_pred = self.tr_noise_scheduler.remove_noise(noisy_latents, model_pred, timesteps)
+            # x0_pred = self.tr_noise_scheduler.remove_noise(noisy_latents, model_pred, timesteps)  #dylee del
+            #dylee add
+            x_shape = noisy_latents.shape
+            b = x_shape[0]
+            sqrt_alphas_cumprod = torch.sqrt(self.tr_noise_scheduler.alphas_cumprod).to(noisy_latents.device)
+            sqrt_one_minus_alphas_cumprod = torch.sqrt(1. - self.tr_noise_scheduler.alphas_cumprod).to(noisy_latents.device)
+            w1 = sqrt_alphas_cumprod.gather(-1,timesteps).reshape(b, *((1,) * (len(x_shape) - 1)))
+            w2 = sqrt_one_minus_alphas_cumprod.gather(-1,timesteps).reshape(b, *((1,) * (len(x_shape) - 1)))
+            x0_pred = (noisy_latents - w2 * model_pred) / w1
+            #dylee add
             loss = F.mse_loss(x0_pred.float(), target.float(), reduction="mean")
         else:
             if self.tr_noise_scheduler.prediction_type == "epsilon":
@@ -724,7 +797,7 @@ class Net(nn.Module):
             loss = F.mse_loss(model_pred.float(), target.float(), reduction="mean")
 
         outputs['loss_total'] = loss
-        reference_control_writer.clear()
+        # reference_control_writer.clear()
         return outputs
 
 
@@ -814,13 +887,13 @@ class Net(nn.Module):
      
         if self.args.ref_null_caption: # test must use null caption
             text = inputs['input_text']
-            text = ["" for i in text]
+            # text = ["" for i in text]
             text_embeddings = self.text_encode(
                 text, num_images_per_prompt=self.args.num_inf_images_per_prompt,
                 do_classifier_free_guidance=do_classifier_free_guidance,
                 negative_prompt=None)
-        reference_control_writer = ReferenceAttentionControl(self.appearance_encoder, do_classifier_free_guidance=True, mode='write')
-        reference_control_reader = ReferenceAttentionControl(self.unet, do_classifier_free_guidance=True, mode='read')
+        # reference_control_writer = ReferenceAttentionControl(self.appearance_encoder, do_classifier_free_guidance=True, mode='write')
+        # reference_control_reader = ReferenceAttentionControl(self.unet, do_classifier_free_guidance=True, mode='read')
         if self.args.add_shape:
             shape =torch.tensor([eval(s) for s in inputs['shape']])
             shape =shape[:,None,:].to(memory_format=torch.contiguous_format).float()
@@ -916,7 +989,7 @@ class Net(nn.Module):
         else:
             num_actual_inference_steps = self.args.num_actual_inference_steps
 
-        ref_image_latents = self.image_encoder(ref_image).cuda()
+        # ref_image_latents = self.image_encoder(ref_image).cuda()
             
         # Denoising loop
         num_warmup_steps = len(timesteps) - self.args.num_inference_steps * self.noise_scheduler.order
@@ -926,12 +999,12 @@ class Net(nn.Module):
                 if num_actual_inference_steps is not None and i < self.args.num_inference_steps - num_actual_inference_steps:
                     continue
                 '''
-                self.appearance_encoder(
-                    ref_image_latents.repeat(2 if do_classifier_free_guidance else 1, 1, 1, 1),
-                    t,
-                    encoder_hidden_states=text_embeddings,
-                    return_dict=False,
-                )
+                # self.appearance_encoder(
+                #     ref_image_latents.repeat(2 if do_classifier_free_guidance else 1, 1, 1, 1),
+                #     t,
+                #     encoder_hidden_states=refer_latents,
+                #     return_dict=False,
+                # )
                 # expand the latents if we are doing classifier free guidance
                 latent_model_input = torch.cat([latents] * 2) if do_classifier_free_guidance else latents
                 latent_model_input = self.noise_scheduler.scale_model_input(latent_model_input, t)
@@ -976,13 +1049,26 @@ class Net(nn.Module):
                 '''
 
                 # predict the noise residual
-                reference_control_reader.update(reference_control_writer)
+                # reference_control_reader.update(reference_control_writer)
+                # refer_latents_tensor = torch.stack(refer_latents)
+                # print('refer_latents_tensor',refer_latents_tensor.shape)
+                # print('refer_latents',len(refer_latents),refer_latents[0].shape)
+                # print('text_embeddings',text_embeddings.shape)
+                # refer_latents_tensor torch.Size([4, 2, 973, 768])
+                # refer_latents 4 torch.Size([2, 973, 768])                                                                                                                                                                                                                                                   | 0/50 [00:00<?, ?it/s]
+                # text_embeddings torch.Size([2, 77, 768])
+
+                # text_embeddings = [text_embeddings]*len(refer_latents)
+                # refer_latents_adp = torch.cat([text_embeddings, refer_latents_tensor], dim=1)
+                refer_latents_adp = [torch.cat([text_embeddings, latents], dim=1) for latents in refer_latents]
+                # print('refer_latents_adp',refer_latents_adp[0].shape)
+                # torch.Size([2, 1050, 768])
                 noise_pred = self.unet(
                     latent_model_input,
                     t,
-                    encoder_hidden_states=text_embeddings,
+                    encoder_hidden_states=refer_latents_adp,
                     ).sample.to(dtype=self.dtype)
-                reference_control_reader.clear()
+                # reference_control_reader.clear()
                 # perform guidance
                 if do_classifier_free_guidance:
                     noise_pred_uncond, noise_pred_text = noise_pred.chunk(2)
@@ -995,7 +1081,7 @@ class Net(nn.Module):
                 if i == len(timesteps) - 1 or (
                         (i + 1) > num_warmup_steps and (i + 1) % self.noise_scheduler.order == 0):
                     progress_bar.update()
-                reference_control_writer.clear()
+                # reference_control_writer.clear()
 
         # Post-processing
         gen_img = self.image_decoder(latents)
@@ -1139,3 +1225,33 @@ def tensor2pil(images):
         pil_images = [Image.fromarray(image) for image in images]
 
     return pil_images
+class DINO_ADAPTER(ModelMixin, ConfigMixin):
+    #调整通道
+    _supports_gradient_checkpointing = True #False
+
+    @register_to_config
+    def __init__(
+        self,
+        in_channels_lst: Tuple[int] = (1024, 1024, 1024, 1024),
+        out_channels_lst: Tuple[int] = (128, 256, 512, 512),
+    ):
+        super().__init__()
+        self.in_channels_lst = in_channels_lst
+        self.out_channels_lst = out_channels_lst
+        self.adapter_blocks = nn.ModuleList([])
+        for in_ch, out_ch in zip(in_channels_lst, out_channels_lst):
+            self.adapter_blocks.append(nn.Sequential(nn.Linear(in_ch, out_ch),nn.LayerNorm(out_ch)))
+
+    def forward(self, dino_outputs):
+        if isinstance(dino_outputs, list):
+            pass
+        else:
+            dino_outputs = [dino_outputs] * len(self.in_channels_lst)
+        adapter_states = []
+        for idx, dino_output in enumerate(dino_outputs):
+            # print('in',dino_output.shape)
+            # torch.Size([1, 973, 1024])
+            adapter_states.append(self.adapter_blocks[idx](dino_output))
+        # print('in,',adapter_states[0].shape,adapter_states[1].shape,adapter_states[2].shape,adapter_states[3].shape)
+        # in, torch.Size([1, 973, 768]) torch.Size([1, 973, 768]) torch.Size([1, 973, 768]) torch.Size([1, 973, 768])
+        return adapter_states

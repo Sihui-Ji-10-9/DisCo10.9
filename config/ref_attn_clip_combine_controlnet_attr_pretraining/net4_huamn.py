@@ -28,11 +28,11 @@ from .controlnet import ControlNetModel, MultiControlNetModel_MultiHiddenStates
 # from PIL import Image
 from utils.common import ensure_directory
 from utils.dist import synchronize
-# from dinov2.dinov_2 import get_dinov2_model
+from dinov2.dinov_2 import get_dinov2_model
 
 from einops import rearrange
 import imageio
-# from consistencydecoder import ConsistencyDecoder
+from consistencydecoder import ConsistencyDecoder
 from magicanimate.models.appearance_encoder import AppearanceEncoderModel
 from magicanimate.models.mutual_self_attention import ReferenceAttentionControl
 
@@ -60,14 +60,13 @@ class Net(nn.Module):
         
         print('Loading CLIP image encoder')
         # feature_extractor = CLIPImageProcessor.from_pretrained(args.pretrained_model_path, subfolder="feature_extractor")
-        # feature_extractor = AutoImageProcessor.from_pretrained(args.dinov2_model_path, crop_size={'height': args.img_full_size[0], 'width': args.img_full_size[0]})
-        feature_extractor = AutoImageProcessor.from_pretrained('huggingface/hub/models--facebook--dinov2-large/snapshots/47b73eefe95e8d44ec3623f8890bd894b6ea2d6c', crop_size={'height': args.img_full_size[0], 'width': args.img_full_size[0]})
+        feature_extractor = AutoImageProcessor.from_pretrained('/home/nfs/jsh/DisCo/huggingface/hub/models--facebook--dinov2-large/snapshots/47b73eefe95e8d44ec3623f8890bd894b6ea2d6c', crop_size={'height': args.img_full_size[0], 'width': args.img_full_size[0]})
         print(f"Loading pre-trained image_encoder from {args.pretrained_model_path}/image_encoder")
         # clip_image_encoder = CLIPVisionModelWithProjection.from_pretrained(args.pretrained_model_path, subfolder="image_encoder")
         
         print(f'Loading DINOv2 image encoder, version {self.args.dinov2_version}')
-        # clip_image_encoder = AutoModel.from_pretrained(args.dinov2_model_path)
-        clip_image_encoder = AutoModel.from_pretrained('huggingface/hub/models--facebook--dinov2-large/snapshots/47b73eefe95e8d44ec3623f8890bd894b6ea2d6c')
+        # clip_image_encoder = AutoModel.from_pretrained('facebook/dinov2-large')
+        clip_image_encoder = AutoModel.from_pretrained('/home/nfs/jsh/DisCo/huggingface/hub/models--facebook--dinov2-large/snapshots/47b73eefe95e8d44ec3623f8890bd894b6ea2d6c')
         # clip_image_encoder = AutoModel.from_pretrained('/mnt_group/yuer.qian/pretrain_model/huggingface/dinov2_tryon_19m_20ep_vitl14')
 
         # dinov2_image_encoder = get_dinov2_model(self.args.dinov2_model_path, version=self.args.dinov2_version, pretrained=False)
@@ -82,19 +81,11 @@ class Net(nn.Module):
 
         print(f"Loading pre-trained vae from {args.pretrained_model_path}/vae")
         vae = AutoencoderKL.from_pretrained(
-            args.pretrained_model_path+"/vae")
+            args.pretrained_model_path, subfolder="vae")
         print(f"Loading pre-trained unet from {self.args.pretrained_model_path}/unet")
         unet = UNet2DConditionModel.from_pretrained(
             self.args.pretrained_model_path, subfolder="unet")
-        if args.ref_null_caption:
-            tokenizer = CLIPTokenizer.from_pretrained(self.args.sd15_path+ "/tokenizer")
-            self.tokenizer = tokenizer
-            print(f"Loading pre-trained text_encoder from {self.args.sd15_path}/text_encoder")
-            text_encoder = CLIPTextModel.from_pretrained(self.args.sd15_path + "/text_encoder")
-            self.text_encoder = text_encoder
-        # appearance_encoder = AppearanceEncoderModel.from_pretrained(self.args.pretrained_appearance_encoder_path, subfolder="appearance_encoder")
-        appearance_encoder = AppearanceEncoderModel.from_pretrained(self.args.pretrained_model_path, subfolder="unet")
-        # ok!
+        appearance_encoder = AppearanceEncoderModel.from_pretrained(self.args.pretrained_appearance_encoder_path, subfolder="appearance_encoder")
 
         if hasattr(noise_scheduler.config, "steps_offset") and noise_scheduler.config.steps_offset != 1:
             deprecation_message = (
@@ -605,7 +596,11 @@ class Net(nn.Module):
         return latents
     
     def forward_train_multicontrol(self, inputs, outputs):
-        
+        # # use CFG
+        # if self.args.drop_ref > 0:
+        #     p = random.random()
+        #     if p <= self.args.drop_ref: # dropout ref image
+        #         inputs['reference_img'] = torch.zeros_like(inputs['reference_img'])
         loss_target = self.args.loss_target
         image = inputs['label_imgs']  # (B, C, H, W)
         ref_image = inputs['reference_img']
@@ -616,10 +611,7 @@ class Net(nn.Module):
             text = inputs['input_text']
             if random.random() < self.args.drop_text: # drop text w.r.t the prob
                 text = ["" for i in text]
-            text_zero = ["" for i in text]
-            # print('text',text)
             z_text = self.text_encode(text)
-            z_text_zero = self.text_encode(text_zero)
 
         # text SD input --> reference image input (clip global embedding)
         if self.args.combine_clip_local:
@@ -659,7 +651,7 @@ class Net(nn.Module):
         self.appearance_encoder(
             ref_image_latents.repeat(1, 1, 1, 1),
             timesteps,
-            encoder_hidden_states=z_text_zero,
+            encoder_hidden_states=refer_latents,
             return_dict=False,
         )
 
@@ -707,7 +699,7 @@ class Net(nn.Module):
         model_pred = self.unet(
             noisy_latents,
             timesteps,
-            encoder_hidden_states=z_text # refer latents
+            encoder_hidden_states=refer_latents # refer latents
         ).sample
         reference_control_reader.clear()
         if loss_target == "x0":
@@ -929,7 +921,7 @@ class Net(nn.Module):
                 self.appearance_encoder(
                     ref_image_latents.repeat(2 if do_classifier_free_guidance else 1, 1, 1, 1),
                     t,
-                    encoder_hidden_states=text_embeddings,
+                    encoder_hidden_states=refer_latents,
                     return_dict=False,
                 )
                 # expand the latents if we are doing classifier free guidance
@@ -980,8 +972,7 @@ class Net(nn.Module):
                 noise_pred = self.unet(
                     latent_model_input,
                     t,
-                    encoder_hidden_states=text_embeddings,
-                    ).sample.to(dtype=self.dtype)
+                    encoder_hidden_states=refer_latents).sample.to(dtype=self.dtype)
                 reference_control_reader.clear()
                 # perform guidance
                 if do_classifier_free_guidance:
