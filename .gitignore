@@ -86,3 +86,5 @@ docs/_build/
 /blip2/
 /blip2-opt-2.7b/
 /config/aa_image_retrain/
+/train/
+/eval/
